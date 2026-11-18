@@ -140,9 +140,11 @@ const TOOLS = [
 // ---------- helpers ----------
 
 function snapshot() {
+  diary.refresh(); // this process lives as long as its session: read what the board server has written since
   const scanResult = claude.scan();
   if (!store.exists()) view.seed(scanResult); // first use, before the web server got to it
   view.applyAutoLinks(scanResult);
+  view.applyAutoMoves(scanResult);
   const state = view.buildState(store.load(), scanResult);
   const me = claude.currentSession();
   const mine = me ? state.sessions.find((s) => s.id === me.id || s.cliId === me.cliId) : null;
@@ -318,7 +320,6 @@ const HANDLERS = {
     const day = a.date ? diary.parseDay(a.date) : '';
     if (a.date && !day) throw new store.UserError('Give the date as YYYY-MM-DD, "today" or "yesterday".');
     const { state } = snapshot();
-    diary.refresh(); // the web server keeps the diary; read what it has written by now
     diary.setNotes(store.load().dayNotes);
     return diary.markdown({ day, days: a.days, q: a.query, project: a.project, limit: a.limit }, state);
   },

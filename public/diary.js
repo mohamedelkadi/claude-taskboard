@@ -30,7 +30,7 @@ function loadDiary(now) {
       D.data = j;
       D.key = want;
       D.v = j.v;
-      if (j.v > D.latest) D.latest = j.v;
+      D.latest = j.v; // the answer is the newest word; the stream says when that changes
     }
     if (S.view === 'diary') renderMain();
   }, now ? 0 : 220);
@@ -239,7 +239,8 @@ function diaryDay(d) {
 function diaryResults(d) {
   const r = d.results;
   if (!r.total) return `<h2>Nothing in the diary matches “${esc(r.q)}”</h2><div class="empty-state">The diary searches what you asked, what Claude reported back, commits, pull requests, file names and your notes.</div>`;
-  const out = [`<h2>${count(r.total, 'match')} for “${esc(r.q)}” <span class="muted">on ${count(r.days.length, 'day')}</span></h2>`];
+  const asked = /^".*"$/.test(r.q) ? esc(r.q) : `“${esc(r.q)}”`; // a quoted phrase brings its own quotes
+  const out = [`<h2>${count(r.total, 'match')} for ${asked} <span class="muted">on ${count(r.days.length, 'day')}</span></h2>`];
   let day = '';
   for (const it of r.items) {
     if (it.day !== day) {
@@ -266,7 +267,7 @@ function diaryResults(d) {
 function renderDiary() {
   const D = S.diary;
   const want = diaryWant();
-  const stale = !D.data || D.key !== want || D.latest > D.v;
+  const stale = !D.data || D.key !== want || D.latest !== D.v;
   // each thing is asked for once, so a request that failed is not repeated forever
   if (stale && D.asked !== `${want}|${D.latest}`) loadDiary(!D.data || D.key === want);
   if (!D.data) {
@@ -310,6 +311,15 @@ function diaryStep(n) {
 }
 
 ACTIONS['diary-day'] = (el) => diaryGo(el.dataset.day || '');
+// from a card: every day a session worked, found by its name
+ACTIONS['diary-find'] = (el) => {
+  S.q = `"${el.dataset.q}"`;
+  $('#q').value = S.q;
+  S.view = 'diary';
+  S.cardId = null;
+  setHash();
+  render();
+};
 ACTIONS['diary-retry'] = () => {
   S.diary.asked = '';
   renderMain();

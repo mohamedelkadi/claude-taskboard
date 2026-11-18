@@ -4,7 +4,7 @@
 
 const REL_OUT = { blocks: 'Blocks', parent: 'Parent of', relates: 'Related to' };
 const REL_IN = { blocks: 'Blocked by', parent: 'Part of', relates: 'Related to' };
-const VIA = { group: 'filed in the same sidebar group', ticket: 'mentions the card’s ticket', child: 'started from a session on this card', family: 'imported with the sessions it started from', claude: 'linked by Claude', manual: '' };
+const VIA = { group: 'filed in the same sidebar group', ticket: 'mentions the card’s ticket', child: 'started from a session on this card', brief: 'started from this card', family: 'imported with the sessions it started from', claude: 'linked by Claude', manual: '' };
 
 // ---------- session detail (step list, outcome), fetched on demand ----------
 
@@ -97,7 +97,7 @@ function subRow(card, sub) {
         <div class="row-actions"><button class="btn small" data-act="open-session" data-session="${esc(s.id)}">Open in Claude</button><button class="btn small ghost" data-act="copy-id" data-session="${esc(s.id)}">Copy session id</button><button class="btn small ghost danger" data-act="sub-remove" data-sub="${esc(sub.id)}">Take off this card</button></div></div>`;
     }
   } else if (linked) {
-    meta = `<div class="sub-meta"><span>${sub.kind === 'routine' ? 'This scheduled task has no runs on this Mac.' : 'The session was deleted from Claude.'}</span></div>`;
+    meta = `<div class="sub-meta"><span>${sub.kind === 'routine' ? 'This scheduled task has no runs on this Mac.' : `The session was deleted from Claude.${sub.known ? ` <button class="fold" data-act="diary-find" data-q="${esc(sub.title)}">See what it did in the Diary</button>` : ''}`}</span></div>`;
   }
 
   const buttons = linked
@@ -137,8 +137,11 @@ function drawerHtml(card) {
   const d = S.data;
   const x = ix();
   const v = card.view;
-  const open = v.subs.filter((s) => s.status !== 'done');
-  const done = v.subs.filter((s) => s.status === 'done');
+  // A card's sessions stay in sight whatever their state: a session that finished a turn
+  // is still the place the work happens. Only ticked-off checklist items fold away.
+  const folds = (s) => s.status === 'done' && s.kind === 'manual';
+  const open = v.subs.filter((s) => !folds(s));
+  const done = v.subs.filter(folds);
   const pct = v.counts.total ? Math.round((v.counts.done / v.counts.total) * 100) : 0;
   const auto = card.auto || {};
 
@@ -171,7 +174,7 @@ function drawerHtml(card) {
       <textarea class="d-title" rows="1" data-keep="title" data-commit="card-title" spellcheck="false">${esc(card.title)}</textarea>
       <div class="d-meta">
         <label>Project<input class="field" list="projects" data-keep="project" data-commit="card-project" value="${esc(card.project)}" placeholder="—"></label>
-        <label>Ticket<input class="field" data-keep="ticket" data-commit="card-ticket" value="${esc(card.ticket)}" placeholder="e.g. PROJ-3883"></label>
+        <label>Ticket<input class="field" data-keep="ticket" data-commit="card-ticket" value="${esc(card.ticket)}" placeholder="PROJ-3883, or a link"></label>
         <label>Tags<input class="field" data-keep="tags" data-commit="card-tags" value="${esc(card.tags.join(', '))}" placeholder="comma separated"></label>
         <label>Due<input class="field" type="date" data-keep="due" data-change="card-due" value="${esc(card.due || '')}"></label>
       </div>
@@ -269,10 +272,14 @@ COMMITS['card-project'] = (el) => {
 };
 COMMITS['card-ticket'] = (el) => {
   const card = currentCard();
-  const v = el.value.trim().toUpperCase();
+  // a link (a Slack thread, a tracker page) is kept as typed; a key is upper-cased
+  const link = /^https?:\/\//i.test(el.value.trim());
+  const v = link ? el.value.trim() : el.value.trim().toUpperCase();
   if (!card || v === card.ticket) return;
-  // naming a ticket also pulls in sessions that mention it
-  const keys = [...new Set([...(card.auto.ticketKeys || []).filter((k) => k !== card.ticket), v].filter(Boolean))];
+  // naming a ticket also pulls in sessions that mention it; from a link, only a key inside it can
+  const key = link ? ticketKeyIn(v) : v;
+  const was = /^https?:\/\//i.test(card.ticket) ? ticketKeyIn(card.ticket) : card.ticket;
+  const keys = [...new Set([...(card.auto.ticketKeys || []).filter((k) => k !== was), key].filter(Boolean))];
   cardOp('card.update', { ticket: v, auto: { ticketKeys: keys } });
 };
 COMMITS['card-tags'] = (el) => {
@@ -361,7 +368,10 @@ ACTIONS['note-add'] = async () => {
   ta.value = '';
   await cardOp('note.add', { text });
 };
-ACTIONS['note-remove'] = (el) => cardOp('note.remove', { noteId: el.dataset.note });
+ACTIONS['note-remove'] = async (el) => {
+  // a note can hold an afternoon's findings: never gone on one stray click
+  if (await confirmModal('Delete this note?', 'It is removed for good.', 'Delete note')) cardOp('note.remove', { noteId: el.dataset.note });
+};
 ACTIONS['card-archive'] = async () => {
   const card = currentCard();
   if (!card) return;

@@ -26,6 +26,7 @@ const DEFAULT_SETTINGS = {
   ticketUrl: '', // e.g. https://acme.atlassian.net/browse/{key}
   inheritChildren: true, // a session started from a linked session joins the same card
   autostart: true, // Claude sessions start the board server when it is not running
+  followSessions: true, // a card that has not started moves to In progress when one of its sessions works
 };
 
 class UserError extends Error {}
@@ -34,6 +35,9 @@ const now = () => Date.now();
 const rid = () => crypto.randomBytes(4).toString('hex');
 const str = (v, max) => (v == null ? '' : String(v).slice(0, max));
 const clean = (v, max) => str(v, max).replace(/\s+/g, ' ').trim();
+const isLink = (v) => /^https?:\/\//i.test(String(v || ''));
+/** A ticket is a tracker key (PROJ-12, upper-cased) or a link to it, which is kept exactly as typed. */
+const ticketValue = (v) => (isLink(str(v, 500).trim()) ? str(v, 500).trim().replace(/\s+/g, '') : clean(v, 60).toUpperCase());
 
 function emptyBoard() {
   const t = now();
@@ -67,6 +71,14 @@ function normalize(b) {
     if (!Array.isArray(c.tags)) c.tags = [];
     if (!c.auto || typeof c.auto !== 'object') c.auto = {};
     if (typeof c.order !== 'number') c.order = 0;
+    // when the card was put in its column: sessions that work after that can move it on
+    if (typeof c.statusAt !== 'number') c.statusAt = b.updatedAt || c.updatedAt || 0;
+    // an earlier version upper-cased links typed as the ticket, and took them for ticket keys
+    if (/^HTTPS?:\/\//.test(c.ticket || '')) {
+      const typed = (String(c.description || '').match(/https?:\/\/[^\s)>\]]+/gi) || []).find((u) => u.toUpperCase().startsWith(c.ticket));
+      c.ticket = typed || c.ticket.replace(/^[^/]+\/\/[^/]+/, (origin) => origin.toLowerCase());
+    }
+    if (Array.isArray(c.auto.ticketKeys) && c.auto.ticketKeys.some(isLink)) c.auto.ticketKeys = c.auto.ticketKeys.filter((k) => !isLink(k));
   }
   return b;
 }
@@ -238,7 +250,7 @@ function sanitizeAuto(a) {
   const out = {};
   if (!a || typeof a !== 'object') return out;
   if (a.groupId) out.groupId = str(a.groupId, 80);
-  if (Array.isArray(a.ticketKeys)) out.ticketKeys = [...new Set(a.ticketKeys.map((k) => clean(k, 30).toUpperCase()).filter(Boolean))];
+  if (Array.isArray(a.ticketKeys)) out.ticketKeys = [...new Set(a.ticketKeys.filter((k) => !isLink(k)).map((k) => clean(k, 30).toUpperCase()).filter(Boolean))];
   if (Array.isArray(a.routineIds)) out.routineIds = [...new Set(a.routineIds.map((k) => clean(k, 120)).filter(Boolean))];
   if (a.inheritChildren === false) out.inheritChildren = false;
   return out;
@@ -262,7 +274,7 @@ const OPS = {
       order: topOrder(b, col.id),
       priority: PRIORITIES.includes(a.priority) ? a.priority : 'medium',
       project: clean(a.project, 200),
-      ticket: clean(a.ticket, 60).toUpperCase(),
+      ticket: ticketValue(a.ticket),
       tags: tagList(a.tags),
       due: a.due ? str(a.due, 10) : null,
       subtasks: [],
@@ -270,6 +282,7 @@ const OPS = {
       notes: [],
       auto: sanitizeAuto(a.auto),
       archived: false,
+      statusAt: t,
       createdAt: t,
       updatedAt: t,
     };
@@ -297,7 +310,7 @@ const OPS = {
       card.priority = a.priority;
     }
     if (a.project !== undefined) card.project = clean(a.project, 200);
-    if (a.ticket !== undefined) card.ticket = clean(a.ticket, 60).toUpperCase();
+    if (a.ticket !== undefined) card.ticket = ticketValue(a.ticket);
     if (a.tags !== undefined) card.tags = tagList(a.tags);
     if (a.due !== undefined) card.due = a.due ? str(a.due, 10) : null;
     if (a.archived !== undefined) card.archived = !!a.archived;
@@ -307,6 +320,7 @@ const OPS = {
       if (col.id !== card.status) {
         card.order = topOrder(b, col.id);
         card.status = col.id;
+        card.statusAt = now();
       }
     }
     touch(card);
@@ -324,6 +338,7 @@ const OPS = {
       if (i >= 0) at = i;
     } else if (a.top) at = 0;
     others.splice(at, 0, card);
+    if (card.status !== col.id) card.statusAt = now();
     card.status = col.id;
     others.forEach((c, i) => (c.order = (i + 1) * 1000));
     touch(card);
@@ -557,6 +572,7 @@ const OPS = {
     }
     if (a.inheritChildren !== undefined) s.inheritChildren = !!a.inheritChildren;
     if (a.autostart !== undefined) s.autostart = !!a.autostart;
+    if (a.followSessions !== undefined) s.followSessions = !!a.followSessions;
     return s;
   },
 };

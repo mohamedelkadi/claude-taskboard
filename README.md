@@ -68,7 +68,7 @@ The left rail lists open sessions that are not on a card yet.
 - A dashed hint under a session (`→ TB-7 · mentions SHOP-198`) is a suggestion; click it to accept.
 - Press `n` or use **New card** for a card with no session yet.
 
-Drag cards between columns to change their status. The chips on a card show how many of its sessions are running, need you, or are ready for review, and which pull requests they opened.
+Drag cards between columns to change their status. A card in a column before **In progress** moves there on its own when one of its sessions starts working (you can switch that off in Settings); nothing else moves a card but you. The chips on a card show how many of its sessions are running, need you, or are ready for review, and which pull requests they opened.
 
 ### 3. Open a card
 
@@ -76,7 +76,8 @@ Click a card to see everything about the task in one place.
 
 ![A card: its sub-tasks, with one session unfolded to show its steps](docs/screenshots/card.png)
 
-- **Sub-tasks** are either checklist items you tick yourself or linked sessions. A linked session's status says `· auto`: it follows the session. Pick a status by hand only to override it.
+- **Sub-tasks** are either checklist items you tick yourself or linked sessions. A linked session's status says `· auto`: it follows the session. Pick a status by hand only to override it. A card's sessions are always listed, whatever their state; a session Claude has deleted keeps its name and a link to its days in the Diary.
+- **Ticket** takes a tracker key (`SHOP-212`) or a link, for example to a Slack thread.
 - **Unfold a session** (the arrow on the right) to see its step list, what it was started with, its branch and cost.
 - A session that is **waiting on you** shows its question on the card. **Open in Claude** takes you to that session; **Mark handled** clears it until the session asks again.
 - **Start a session** opens Claude's new-session page in the folder of the card's **Project**, with a brief for this card in the prompt box (it also copies the brief, in case the page opens empty). The folder is the one earlier sessions of that project ran in; for a project no session has run in yet, you pick the folder in Claude. The new session reads the card and links itself to it.
@@ -88,6 +89,7 @@ Further down the card:
 
 - **Connections** say how cards relate: *blocks*, *parent of*, *related to*. "Possibly related" rows are ones the board noticed itself, for example two cards whose sessions touch the same pull request; **Connect** makes it a real connection.
 - **Which sessions join this card on their own**:
+  - a session started with the card's **Start a session** button
   - sessions **started from** a session already on the card
   - sessions filed in a **Claude sidebar group**
   - sessions whose title or branch mentions a **ticket key** (for example `SHOP-212`)
@@ -221,7 +223,7 @@ taskboard uninstall --purge  # also deletes the board and the diary
 ## Development
 
 ```bash
-npm test                     # 23 tests, against fake Claude folders in a temp directory
+npm test                     # 27 tests, against fake Claude folders in a temp directory
 ```
 
 ```bash
@@ -238,6 +240,7 @@ No dependencies and no build step. `src/store.js` is the board and its operation
 
 - The session files and transcript format are Claude internals, not a documented interface, so a Claude update can change them. `taskboard doctor` shows what is found.
 - A session's status summary comes from the desktop app, so sessions run only in a terminal show as idle unless they are running.
+- The page follows Claude within a second or two: it is told of every change, and checks every few seconds while a session is working. If its connection drops (the Mac slept, the window sat hidden) it reconnects and catches up by itself.
 - The diary starts from the transcripts still on disk the first time it runs. For older days it has only what the session records and the terminal's prompt history hold: titles, last reports and prompts.
 - The diary holds the beginning of each prompt and reply in plain text, as Claude's own transcripts do. It stays on your Mac, in the folder above.
 - macOS only for now: the desktop app's folder and the Mac app are Mac-specific.

@@ -183,6 +183,113 @@ test('a new session starts in the folder of the card\'s project', () => {
   assert.equal(new URL(view.newSessionUrl('hi', '')).searchParams.has('folder'), false);
 });
 
+test('a card that has not started moves to In progress when one of its sessions works', () => {
+  // an earlier test cut the board down to two columns; a board with no "in progress" column moves nothing
+  const found = store.load().columns;
+  const lone = store.apply('card.create', { title: 'Nowhere to go' });
+  fx.desktopSession(fx.ids.other, 3, { title: 'Unrelated work', lastActivityAt: Date.now() + 60e3 });
+  store.apply('session.link', { card: lone.id, sessionIds: [fx.ids.other] });
+  assert.deepEqual(view.applyAutoMoves(claude.scan()), []);
+  store.apply('columns.set', { columns: [{ id: 'todo', name: 'Next' }, { name: 'Doing' }, { name: 'Checking' }, { name: 'Shipped', done: true }] });
+  assert.deepEqual(view.applyAutoMoves(claude.scan()), [lone.key], 'a column named like "in progress" counts');
+  store.apply('card.delete', { card: lone.id });
+  store.apply('columns.set', { columns: store.DEFAULT_COLUMNS });
+
+  const made = store.apply('card.create', { title: 'Follow me', status: 'To do' });
+  const put = (ago) => store.mutate((b) => (b.cards.find((c) => c.id === made.id).statusAt = Date.now() - ago));
+  const column = () => card(state(), 'Follow me').status;
+  // the card was put in To do a minute ago; its session last worked half a minute ago
+  fx.desktopSession(fx.ids.other, 3, { title: 'Unrelated work', lastActivityAt: Date.now() - 30e3 });
+  put(60e3);
+  store.apply('session.link', { card: made.id, sessionIds: [fx.ids.other] });
+  assert.deepEqual(view.applyAutoMoves(claude.scan()), [made.key]);
+  assert.equal(column(), 'in_progress');
+  assert.deepEqual(view.applyAutoMoves(claude.scan()), [], 'once there, nothing more to do');
+
+  // put back by hand: work done before that does not move it again
+  store.apply('card.update', { card: made.id, status: 'To do' });
+  assert.deepEqual(view.applyAutoMoves(claude.scan()), []);
+  assert.equal(column(), 'todo');
+  // a session that is working right now does
+  const live = path.join(P.LIVE_DIR, '4242.json');
+  fs.writeFileSync(live, JSON.stringify({ pid: process.pid, status: 'busy', sessionId: fx.uuid(103), hostSessionId: fx.ids.other, cwd: '/work/app', name: 'x' }));
+  assert.deepEqual(view.applyAutoMoves(claude.scan()), [made.key]);
+  fs.rmSync(live);
+
+  // it only ever moves forward, and can be switched off
+  store.apply('card.update', { card: made.id, status: 'In review' });
+  put(60e3);
+  assert.deepEqual(view.applyAutoMoves(claude.scan()), [], 'a card past In progress is left alone');
+  store.apply('card.update', { card: made.id, status: 'Backlog' });
+  put(60e3);
+  store.apply('settings.update', { followSessions: false });
+  assert.deepEqual(view.applyAutoMoves(claude.scan()), []);
+  store.apply('settings.update', { followSessions: true });
+  assert.deepEqual(view.applyAutoMoves(claude.scan()), [made.key]);
+  store.apply('columns.set', { columns: found }); // as the next tests expect it
+});
+
+test('a session started with a card\'s brief joins that card on its own', async () => {
+  const made = store.apply('card.create', { title: 'Started from the board' });
+  const id = `local_${fx.uuid(7)}`;
+  fx.desktopSession(id, 7, { title: 'A title Claude made up' });
+  fs.writeFileSync(
+    path.join(P.PROJECTS_DIR, '-work-app', `${fx.uuid(107)}.jsonl`),
+    JSON.stringify({ type: 'user', isSidechain: false, cwd: '/work/app', timestamp: new Date().toISOString(), message: { role: 'user', content: view.sessionBrief(made, '/work/app') + 'fix it' } }) + '\n'
+  );
+  claude.scan(); // notices the new transcript, as the board does before it reads one
+  await claude.scanTranscript(fx.uuid(107));
+  const scan = claude.scan();
+  assert.equal(scan.sessions.find((s) => s.id === id).briefCard, made.key);
+  assert.equal(view.applyAutoLinks(scan), 1);
+  const sub = card(state(), 'Started from the board').view.subs[0];
+  assert.deepEqual([sub.sessionId, sub.via], [id, 'brief']);
+  // taken off by hand, it stays off
+  store.apply('session.unlink', { sessionIds: [id] });
+  assert.equal(view.applyAutoLinks(claude.scan()), 0);
+});
+
+test('a link typed as the ticket is kept as typed, and is not a ticket key', () => {
+  const link = 'https://acme.slack.com/archives/C04ABC/p1795';
+  const made = store.apply('card.create', { title: 'With a link', ticket: link, auto: { ticketKeys: [link, 'shop-9'] } });
+  assert.equal(made.ticket, link);
+  assert.deepEqual(made.auto.ticketKeys, ['SHOP-9']);
+  assert.equal(store.apply('card.update', { card: made.id, ticket: 'proj-12' }).ticket, 'PROJ-12');
+  // what an earlier version stored is put right when the board is read
+  store.mutate((b) => {
+    const c = b.cards.find((x) => x.id === made.id);
+    c.ticket = link.toUpperCase();
+    c.description = `see ${link} for the thread`;
+    c.auto.ticketKeys = ['HTTPS://ACME.SLACK.COM/ARCHI'];
+  });
+  const read = store.load().cards.find((x) => x.id === made.id);
+  assert.equal(read.ticket, link);
+  assert.deepEqual(read.auto.ticketKeys, []);
+});
+
+test('a card finds its session again under a new id, and remembers its name once it is gone', () => {
+  const made = store.apply('card.create', { title: 'Keeps its session' });
+  const first = `local_${fx.uuid(8)}`;
+  fx.desktopSession(first, 8, { title: 'Named session' });
+  store.apply('session.link', { card: made.id, sessionIds: [first] });
+  assert.equal(view.applyRemember(claude.scan()), 0, 'nothing to find yet; the name and transcript are noted');
+  const sub = () => card(state(), 'Keeps its session').view.subs[0];
+
+  // Claude drops the record and makes a new one for the same transcript
+  fs.rmSync(path.join(fx.sessDir, `${first}.json`));
+  const second = `local_${fx.uuid(9)}`;
+  fx.desktopSession(second, 9, { title: 'Named session', cliSessionId: fx.uuid(108) });
+  assert.equal(view.applyRemember(claude.scan()), 1);
+  assert.equal(sub().sessionId, second);
+  assert.ok(!sub().missing);
+
+  // gone for good: the card still says what it was
+  fs.rmSync(path.join(fx.sessDir, `${second}.json`));
+  view.applyRemember(claude.scan());
+  assert.equal(sub().missing, true);
+  assert.equal(sub().title, 'Named session');
+});
+
 test('card files are written for Claude and removed with the card', () => {
   view.exportMarkdown(state());
   const a = store.findCard(store.load(), 'A');

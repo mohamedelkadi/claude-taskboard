@@ -58,7 +58,7 @@ The board keeps a diary of the user's work in Claude: for each day, what they as
 
 ## Rules
 
-- The columns are the user's. Move a card when the user asks, or when you finish the work a card describes and the next column is obvious (say that you moved it). Do not move cards the user did not mention.
+- The columns are the user's. Move a card when the user asks, or when you finish the work a card describes and the next column is obvious (say that you moved it). Do not move cards the user did not mention. A card that has not started moves to In progress by itself when a session on it starts working, so do not move it there yourself.
 - Never delete cards or unlink other sessions unless the user asks.
 - Do not set a linked session's sub-task status by hand; it follows the session. Set statuses only on checklist sub-tasks.
 - One card per task or initiative, not per session. If a matching card exists, link to it instead of creating another.

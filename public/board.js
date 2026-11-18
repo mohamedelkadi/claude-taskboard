@@ -10,6 +10,7 @@ function cardFace(card) {
   const pct = c.total ? Math.round((c.done / c.total) * 100) : 0;
   const links = card.links.length + S.data.cards.filter((o) => o.links.some((l) => l.to === card.id)).length;
   const detected = S.data.implicit.filter((p) => p.a === card.id || p.b === card.id).length;
+  const sessions = v.subs.filter((s) => s.kind !== 'manual').length;
   const sig = [];
   if (c.running) sig.push(`<span class="sig running">● ${c.running} running</span>`);
   if (c.needs) sig.push(`<span class="sig needs">${c.needs} need${c.needs === 1 ? 's' : ''} you</span>`);
@@ -27,6 +28,7 @@ function cardFace(card) {
       ${sig.length ? `<div class="signals">${sig.join('')}</div>` : ''}
       <div class="card-foot">
         ${prs.map(prChip).join('')}${v.prs.length > 3 ? `<span class="muted">+${v.prs.length - 3}</span>` : ''}
+        ${sessions ? `<span class="muted" title="Claude sessions on this card">${sessions} session${sessions === 1 ? '' : 's'}</span>` : ''}
         ${links ? `<span title="Connected to ${links} other card${links === 1 ? '' : 's'}">⤳ ${links}</span>` : ''}
         ${detected ? `<span class="muted" title="Its sessions share a PR or a parent with ${detected} other card${detected === 1 ? '' : 's'}. Open the card to connect them.">${links ? '+' : '⤳ '}${detected} possible</span>` : ''}
         <span class="grow"></span><span title="${esc(fullDate(v.lastActivityAt))}">${esc(ago(v.lastActivityAt))}</span>

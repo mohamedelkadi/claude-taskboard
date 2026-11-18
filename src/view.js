@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const P = require('./paths');
 const store = require('./store');
+const diary = require('./diary');
 
 const SUB_FROM_STATE = { running: 'in_progress', needs_you: 'blocked', review: 'review', done: 'done', idle: 'in_progress' };
 const STATE_LABEL = { running: 'running', needs_you: 'needs you', review: 'ready for review', done: 'done', idle: 'idle' };
@@ -45,7 +46,9 @@ function effectiveSub(sub, ctx) {
   if (sub.sessionId) {
     const s = ctx.byId.get(sub.sessionId);
     if (!s) {
-      return { id: sub.id, kind: 'session', sessionId: sub.sessionId, missing: true, auto: sub.status === 'auto', status: sub.status === 'auto' ? 'done' : sub.status, title: sub.title || 'Session no longer on this Mac', via: sub.via || '' };
+      // deleted in Claude: the diary still knows what it was called
+      const was = sub.was || diary.titleOf(sub.sessionId);
+      return { id: sub.id, kind: 'session', sessionId: sub.sessionId, missing: true, known: !!was, auto: sub.status === 'auto', status: sub.status === 'auto' ? 'done' : sub.status, title: sub.title || was || 'Session no longer on this Mac', via: sub.via || '' };
     }
     return {
       id: sub.id, kind: 'session', sessionId: s.id, auto: sub.status === 'auto', state: s.estate,
@@ -257,6 +260,12 @@ function planAutoLinks(board, sessions) {
   };
   for (const s of sessions) {
     if (!free(s)) continue;
+    // started with a card's brief ("Start a session"): it belongs to that card, whether or not it says so itself
+    const byBrief = s.briefCard && live.find((c) => c.key === s.briefCard);
+    if (byBrief) {
+      claim(s, byBrief.id, 'brief');
+      continue;
+    }
     const byGroup = s.groupId && live.find((c) => c.auto.groupId === s.groupId);
     if (byGroup) {
       claim(s, byGroup.id, 'group');
@@ -300,6 +309,104 @@ function applyAutoLinks(scanResult) {
     }
     return adds.length;
   });
+}
+
+/**
+ * What each card should note about its sessions: the name and the transcript a session
+ * has now, and, for a session Claude no longer lists under the id the card knows, the
+ * session that has taken over its transcript. Claude gives a session a new id when it
+ * drops and re-creates its record; without this the card would lose it.
+ */
+function planRemember(board, sessions) {
+  const byId = new Map(sessions.map((s) => [s.id, s]));
+  const byTranscript = new Map();
+  for (const s of sessions) {
+    if (s.cliId) byTranscript.set(s.cliId, s);
+    for (const prior of s.priorCliIds || []) if (!byTranscript.has(prior)) byTranscript.set(prior, s);
+  }
+  const taken = new Set();
+  for (const c of board.cards) for (const sub of c.subtasks) if (sub.sessionId) taken.add(sub.sessionId);
+  const notes = [];
+  for (const card of board.cards) {
+    for (const sub of card.subtasks) {
+      if (!sub.sessionId) continue;
+      const s = byId.get(sub.sessionId);
+      if (s) {
+        if ((sub.cliId || '') !== (s.cliId || '') || (sub.was || '') !== s.title) notes.push({ cardId: card.id, subId: sub.id, cliId: s.cliId || '', was: s.title });
+        continue;
+      }
+      const heir = sub.cliId && byTranscript.get(sub.cliId);
+      if (heir && !taken.has(heir.id)) {
+        taken.add(heir.id);
+        notes.push({ cardId: card.id, subId: sub.id, sessionId: heir.id, cliId: heir.cliId || '', was: sub.was || heir.title });
+      }
+    }
+  }
+  return notes;
+}
+
+/** Write those notes down. Returns how many sessions were found again under a new id. */
+function applyRemember(scanResult) {
+  if (!store.exists()) return 0;
+  if (!planRemember(store.load(), scanResult.sessions).length) return 0;
+  return store.mutate((b) => {
+    let found = 0;
+    for (const n of planRemember(b, scanResult.sessions)) {
+      const card = b.cards.find((c) => c.id === n.cardId);
+      const sub = card && card.subtasks.find((x) => x.id === n.subId);
+      if (!sub) continue;
+      if (n.sessionId) {
+        sub.sessionId = n.sessionId;
+        found++;
+      }
+      sub.cliId = n.cliId;
+      sub.was = n.was;
+    }
+    return found;
+  });
+}
+
+/**
+ * Cards that should move to "In progress" because a session on them is working.
+ * Only a card that has not started (any column left of In progress), and only for
+ * work done after the card was put there, so filing an old session under a card
+ * moves nothing. Returns [{cardId, sessionId}].
+ */
+function planAutoMoves(board, sessions) {
+  if (board.settings.followSessions === false) return [];
+  // the column that means "being worked on": the one the board came with, or one named like it
+  let at = board.columns.findIndex((c) => c.id === 'in_progress');
+  if (at === -1) at = board.columns.findIndex((c) => !c.done && /^(in[ -]?progress|doing|wip|working|started|active)\b/i.test(c.name));
+  if (at < 1) return [];
+  const target = board.columns[at].id;
+  const waiting = new Set(board.columns.slice(0, at).filter((c) => !c.done).map((c) => c.id));
+  const byId = new Map(sessions.map((s) => [s.id, s]));
+  const latestRun = new Map();
+  for (const s of sessions) {
+    if (s.routineId && (!latestRun.has(s.routineId) || s.lastActivityAt > latestRun.get(s.routineId).lastActivityAt)) latestRun.set(s.routineId, s);
+  }
+  const moves = [];
+  for (const card of board.cards) {
+    if (card.archived || !waiting.has(card.status)) continue;
+    for (const sub of card.subtasks) {
+      const s = sub.sessionId ? byId.get(sub.sessionId) : sub.routineId ? latestRun.get(sub.routineId) : null;
+      if (!s || s.archived) continue;
+      if (s.state === 'running' || s.lastActivityAt > (card.statusAt || 0) + 2000) {
+        moves.push({ cardId: card.id, sessionId: s.id, to: target });
+        break;
+      }
+    }
+  }
+  return moves;
+}
+
+/** Move the cards whose sessions have started. Returns the keys of the cards moved. */
+function applyAutoMoves(scanResult) {
+  if (!store.exists()) return [];
+  if (!planAutoMoves(store.load(), scanResult.sessions).length) return [];
+  return store.mutate((b) =>
+    planAutoMoves(b, scanResult.sessions).map((m) => store.OPS['card.move'](b, { card: m.cardId, status: m.to, top: true }).key) // again, under the lock
+  );
 }
 
 // ---------- first run ----------
@@ -543,6 +650,6 @@ function exportMarkdown(state) {
 }
 
 module.exports = {
-  buildState, planAutoLinks, applyAutoLinks, seed, exportMarkdown, cardMarkdown, overviewMarkdown, sessionBrief, newSessionUrl, folderResolver,
+  buildState, planAutoLinks, applyAutoLinks, planAutoMoves, applyAutoMoves, planRemember, applyRemember, seed, exportMarkdown, cardMarkdown, overviewMarkdown, sessionBrief, newSessionUrl, folderResolver,
   effectiveState, ackToken, inferStatus, SUB_LABEL, STATE_LABEL, fmtDate,
 };

@@ -9,7 +9,7 @@ const S = {
   cardId: null, // card open in the drawer
   expanded: new Set(), // sub-tasks unfolded in the drawer
   details: new Map(), // session id -> transcript detail
-  showDoneSubs: false,
+  showDoneSubs: true, // ticked-off checklist items stay in sight until hidden
   showAuto: false,
   editDesc: false,
   editSub: null,
@@ -111,8 +111,21 @@ function hue(text) {
 
 const projChip = (name) => (name ? `<span class="chip proj" style="--h:${hue(name)}" title="Project">${esc(name)}</span>` : '');
 
+/** The tracker key inside a link (…/browse/PROJ-12), if there is one. */
+const ticketKeyIn = (url) => (/(?:^|[^A-Za-z0-9])([A-Z][A-Z0-9]{1,7}-\d{1,6})(?![A-Za-z0-9])/.exec(String(url || '')) || [])[1] || '';
+
 function ticketChip(key) {
   if (!key) return '';
+  if (/^https?:\/\//i.test(key)) {
+    // a link typed as the ticket: show where it goes, not the whole address
+    let label = ticketKeyIn(key);
+    try {
+      label = label || new URL(key).hostname.replace(/^www\./, '');
+    } catch (_) {
+      return '';
+    }
+    return `<a class="chip ticket" href="${esc(key)}" target="_blank" rel="noopener" title="${esc(key)}" data-stop>${esc(label)} ↗</a>`;
+  }
   const tpl = S.data.settings.ticketUrl;
   if (tpl && /^https?:\/\//.test(tpl)) {
     return `<a class="chip ticket" href="${esc(tpl.replace('{key}', encodeURIComponent(key)))}" target="_blank" rel="noopener" data-stop>${esc(key)}</a>`;
@@ -224,7 +237,10 @@ function setData(d) {
   if (!d || !d.columns) return;
   S.data = d;
   IX = null;
-  if (S.cardId && !ix().cards.has(S.cardId)) S.cardId = null;
+  if (S.cardId && !ix().cards.has(S.cardId)) {
+    S.cardId = null; // the open card was deleted, here or by a session
+    setHash();
+  }
   for (const id of [...S.sel]) if (!ix().sessions.has(id)) S.sel.delete(id);
   renderWhenSafe();
 }
@@ -386,7 +402,7 @@ function openCard(id) {
     S.expanded.clear();
     S.editDesc = false;
     S.editSub = null;
-    S.showDoneSubs = false;
+    S.showDoneSubs = true;
     S.showAuto = false;
   }
   S.cardId = id;

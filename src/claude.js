@@ -589,6 +589,9 @@ function scan() {
         : null;
       s.cost = d.cost || 0;
       if (!s.wrapUp && d.wrap) s.wrapUp = d.wrap.recap;
+      // "Start a session" on a card opens Claude with a brief that names the card
+      const brief = /^Work on Taskboard card ([A-Za-z][A-Za-z0-9]*-\d+)\b/.exec(d.firstPrompt || '');
+      if (brief) s.briefCard = brief[1].toUpperCase();
     } else {
       s.steps = null;
       s.cost = 0;
