@@ -1,0 +1,15 @@
+{
+  "name": "claude-taskboard",
+  "version": "1.0.0",
+  "description": "A local kanban board over your Claude Code sessions: cards, sub-tasks, statuses and connections, readable and writable by Claude itself.",
+  "private": true,
+  "license": "UNLICENSED",
+  "bin": { "taskboard": "src/cli.js" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js",
+    "demo": "node scripts/demo.js",
+    "screenshots": "node scripts/screenshots.js"
+  },
+  "engines": { "node": ">=18" }
+}
