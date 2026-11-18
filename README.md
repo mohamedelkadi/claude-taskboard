@@ -79,7 +79,8 @@ Click a card to see everything about the task in one place.
 - **Sub-tasks** are either checklist items you tick yourself or linked sessions. A linked session's status says `· auto`: it follows the session. Pick a status by hand only to override it. A card's sessions are always listed, whatever their state; a session Claude has deleted keeps its name and a link to its days in the Diary.
 - **Ticket** takes a tracker key (`SHOP-212`) or a link, for example to a Slack thread.
 - **Unfold a session** (the arrow on the right) to see its step list, what it was started with, its branch and cost.
-- A session that is **waiting on you** shows its question on the card. **Open in Claude** takes you to that session; **Mark handled** clears it until the session asks again.
+- A session that is **waiting on you** shows its question on the card. **Mark handled** clears it until the session asks again.
+- Every session has an **Open in Claude** button, here and wherever else it is listed: the unsorted list, Needs me, Sessions and the Diary. A session that ran in a terminal gets **Copy resume command** instead.
 - **Start a session** opens Claude's new-session page in the folder of the card's **Project**, with a brief for this card in the prompt box (it also copies the brief, in case the page opens empty). The folder is the one earlier sessions of that project ran in; for a project no session has run in yet, you pick the folder in Claude. The new session reads the card and links itself to it.
 - **Link sessions…** adds existing sessions to the card.
 

@@ -23,7 +23,7 @@ function needItem(s, kind) {
         </div>
       </div>
       <div class="row-actions">
-        <button class="btn small primary" data-act="open-session" data-session="${esc(s.id)}">Open in Claude</button>
+        ${openButton(s, 'primary')}
         ${kind === 'needs' ? `<button class="btn small" data-act="ack" data-session="${esc(s.id)}" title="You dealt with it outside the session">Mark handled</button>` : ''}
       </div>
     </div>`;
@@ -79,7 +79,7 @@ function renderSessions() {
         <td>${card ? `<a class="chip" href="#card=${esc(card.key)}" data-act="open-card" data-card="${esc(card.id)}">${esc(card.key)} ${esc(card.title.slice(0, 26))}</a>` : sug ? `<button class="suggest" data-act="accept-suggest" data-session="${esc(s.id)}" data-card="${esc(sug.id)}">→ ${esc(sug.key)} · ${esc(s.suggest.reason)}</button>` : '<span class="muted">—</span>'}</td>
         <td>${s.prs.slice(0, 3).map(prChip).join(' ')}</td>
         <td class="nowrap muted" title="${esc(fullDate(s.lastActivityAt))}">${esc(ago(s.lastActivityAt))}</td>
-        <td><button class="icon-btn" data-act="open-session" data-session="${esc(s.id)}" title="Open in Claude">↗</button></td>
+        <td class="nowrap">${openButton(s)}</td>
       </tr>`;
     })
     .join('');

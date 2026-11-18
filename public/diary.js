@@ -194,7 +194,7 @@ function diarySessionHead(s, terms) {
       ${title}
       ${projChip(s.projectName)} ${card} ${flag} ${(s.prs || []).map(prChip).join(' ')}
       <span class="grow"></span>
-      ${s.exists ? `<button class="icon-btn" data-act="open-session" data-session="${esc(s.id)}" title="${s.source === 'cli' ? 'Copy the command that resumes it' : 'Open in Claude'}">↗</button>` : ''}
+      ${s.exists ? openButton(s) : ''}
     </header>`;
 }
 

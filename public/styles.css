@@ -85,7 +85,7 @@ select.field { padding-right: 4px; }
 /* ---------- board ---------- */
 .board-wrap { flex: 1; min-width: 0; display: flex; }
 .inbox {
-  width: 292px; flex: none; border-right: 1px solid var(--line); background: var(--panel);
+  width: 320px; flex: none; border-right: 1px solid var(--line); background: var(--panel);
   display: flex; flex-direction: column; min-height: 0;
 }
 .inbox-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 4px; font-weight: 650; }
@@ -452,4 +452,17 @@ mark { background: color-mix(in srgb, var(--needs) 38%, transparent); color: inh
   .dl { grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; }
   .dl .dx { grid-column: 1 / -1; }
   .dsess { padding: 9px 10px 7px; }
+}
+
+/* ---------- the way into a session ---------- */
+.open-btn { flex: none; }
+.open-btn.narrow .wide { display: none; }
+.sess > .open-btn { padding: 1px 8px; font-size: 11.5px; border-color: var(--line); margin-top: 1px; }
+.sub > .open-btn { margin-top: 1px; }
+.dlg-foot .open-btn, .dlg-body .open-btn { padding: 6px 11px; font-size: inherit; }
+@media (max-width: 760px) {
+  table.sessions .open-btn .wide { display: none; }
+}
+@media (max-width: 520px) {
+  .sub > .open-btn .wide, .dsess-head .open-btn .wide { display: none; }
 }

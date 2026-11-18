@@ -90,18 +90,18 @@ function subRow(card, sub) {
     meta = `<div class="sub-meta">${bits.join('')}</div>`;
     if (sub.state === 'needs_you') {
       needs = `<div class="sub-needs">${esc((s.summary && s.summary.needsAction) || 'Waiting for your reply.')}
-        <div class="row-actions" style="margin-top:6px"><button class="btn small" data-act="open-session" data-session="${esc(s.id)}">Open in Claude</button><button class="btn small ghost" data-act="ack" data-session="${esc(s.id)}">Mark handled</button></div></div>`;
+        <div class="row-actions" style="margin-top:6px"><button class="btn small ghost" data-act="ack" data-session="${esc(s.id)}">Mark handled</button></div></div>`;
     }
     if (open) {
       detail = `<div class="sub-detail">${sessionDetailHtml(s)}
-        <div class="row-actions"><button class="btn small" data-act="open-session" data-session="${esc(s.id)}">Open in Claude</button><button class="btn small ghost" data-act="copy-id" data-session="${esc(s.id)}">Copy session id</button><button class="btn small ghost danger" data-act="sub-remove" data-sub="${esc(sub.id)}">Take off this card</button></div></div>`;
+        <div class="row-actions"><button class="btn small ghost" data-act="copy-id" data-session="${esc(s.id)}">Copy session id</button><button class="btn small ghost danger" data-act="sub-remove" data-sub="${esc(sub.id)}">Take off this card</button></div></div>`;
     }
   } else if (linked) {
     meta = `<div class="sub-meta"><span>${sub.kind === 'routine' ? 'This scheduled task has no runs on this Mac.' : `The session was deleted from Claude.${sub.known ? ` <button class="fold" data-act="diary-find" data-q="${esc(sub.title)}">See what it did in the Diary</button>` : ''}`}</span></div>`;
   }
 
   const buttons = linked
-    ? `${s ? `<button class="icon-btn" data-act="open-session" data-session="${esc(s.id)}" title="Open in Claude">↗</button>` : ''}<button class="icon-btn" data-act="${s ? 'sub-toggle' : 'sub-remove'}" data-sub="${esc(sub.id)}" title="${s ? 'Details' : 'Remove'}">${s ? (open ? '▴' : '▾') : '✕'}</button>`
+    ? `${openButton(s, sub.state === 'needs_you' ? 'primary' : '')}<button class="icon-btn" data-act="${s ? 'sub-toggle' : 'sub-remove'}" data-sub="${esc(sub.id)}" title="${s ? 'Details' : 'Remove'}">${s ? (open ? '▴' : '▾') : '✕'}</button>`
     : `<button class="icon-btn" data-act="sub-remove" data-sub="${esc(sub.id)}" title="Remove">✕</button>`;
 
   return `<div class="sub${sub.status === 'done' ? ' is-done' : ''}${linked ? ' linked' : ''}${open ? ' expanded' : ''}">${select}<div class="sub-main">${title}${meta}${needs}${detail}</div>${buttons}</div>`;

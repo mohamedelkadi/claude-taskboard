@@ -143,6 +143,20 @@ function prChip(pr) {
     : `<span class="chip ${cls}" title="${esc(title)}">${esc(label)}</span>`;
 }
 
+/**
+ * The way from the board into a session. A labelled button wherever a session is
+ * shown, never an icon to be found: opening the session is what the board is for.
+ * A session that ran in a terminal cannot be opened in the app, so its button
+ * copies the command that resumes it.
+ */
+function openButton(s, look) {
+  if (!s || !s.id) return '';
+  const cli = s.source === 'cli';
+  const label = cli ? 'Copy resume<span class="wide"> command</span>' : 'Open<span class="wide"> in Claude</span>';
+  const title = cli ? 'It ran in a terminal: copies the command that resumes it' : 'Open this session in the Claude app';
+  return `<button class="btn small open-btn${look ? ' ' + look : ''}" data-act="open-session" data-session="${esc(s.id)}" title="${title}" data-stop>${label}</button>`;
+}
+
 const stateChip = (state) => `<span class="state-chip ${esc(state)}">${esc(STATE_LABEL[state] || state)}</span>`;
 const stateDot = (state) => `<span class="state-dot ${esc(state)}" title="${esc(STATE_LABEL[state] || '')}"></span>`;
 

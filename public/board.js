@@ -48,6 +48,7 @@ function sessionRow(s) {
         <div class="sess-meta">${projChip(s.projectName)}${routine ? `<span>⏰ ${routine.runs} runs</span>` : ''}<span>${esc(ago(s.lastActivityAt))}</span>${s.prs.slice(0, 2).map(prChip).join('')}</div>
         ${sug ? `<button class="suggest" data-act="accept-suggest" data-session="${esc(s.id)}" data-card="${esc(sug.id)}" title="Link to this card">→ ${esc(sug.key)} ${esc(sug.title.slice(0, 26))} · ${esc(s.suggest.reason)}</button>` : ''}
       </div>
+      ${openButton(s, 'ghost narrow')}
       <button class="icon-btn" data-act="hide-session" data-session="${esc(s.id)}" title="Hide from this list">✕</button>
     </div>`;
 }

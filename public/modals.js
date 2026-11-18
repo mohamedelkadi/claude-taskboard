@@ -170,7 +170,7 @@ function sessionModalHtml(s) {
       <span class="grow"></span>
       ${s.estate === 'needs_you' ? `<button class="btn" data-act="ack" data-session="${esc(s.id)}">Mark handled</button>` : ''}
       <button class="btn" data-act="modal-link" data-session="${esc(s.id)}">${card ? 'Move to another card…' : 'Link to a card…'}</button>
-      <button class="btn primary" data-act="open-session" data-session="${esc(s.id)}">Open in Claude</button>
+      ${openButton(s, 'primary')}
     </div></div>`;
 }
 
