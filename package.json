@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "A local kanban board over your Claude Code sessions: cards, sub-tasks, statuses and connections, readable and writable by Claude itself.",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "MIT",
   "bin": { "taskboard": "src/cli.js" },
   "scripts": {
     "start": "node src/server.js",

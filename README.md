@@ -217,3 +217,7 @@ No dependencies and no build step. `src/store.js` is the board and its operation
 - The session files and transcript format are Claude internals, not a documented interface, so a Claude update can change them. `taskboard doctor` shows what is found.
 - A session's status summary comes from the desktop app, so sessions run only in a terminal show as idle unless they are running.
 - macOS only for now: the desktop app's folder and the Mac app are Mac-specific.
+
+## License
+
+[MIT](LICENSE)
