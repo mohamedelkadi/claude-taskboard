@@ -243,11 +243,14 @@ async function handle(req, res) {
       return json(res, 200, { ok: true });
     }
     if (p === '/api/new-session') {
-      // Opens Claude's new-session page with the card's brief in the prompt
-      // box. Claude never sends it: the user picks the folder and presses send.
-      const brief = view.sessionBrief(store.findCard(store.load(), body.card));
-      if (!body.copyOnly) launch(`claude://code/new?q=${encodeURIComponent(brief)}`);
-      return json(res, 200, { ok: true, brief });
+      // Opens Claude's new-session page in the card's project folder, with the
+      // card's brief in the prompt box. Claude never sends it: the user does.
+      const card = store.findCard(store.load(), body.card);
+      const shown = state && state.cards.find((c) => c.id === card.id);
+      const folder = (shown && shown.view.folder) || '';
+      const brief = view.sessionBrief(card, folder);
+      if (!body.copyOnly) launch(view.newSessionUrl(brief, folder));
+      return json(res, 200, { ok: true, brief, folder });
     }
     if (p === '/api/reveal') {
       launch(P.DATA_DIR);

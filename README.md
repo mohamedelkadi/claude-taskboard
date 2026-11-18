@@ -78,7 +78,7 @@ Click a card to see everything about the task in one place.
 - **Sub-tasks** are either checklist items you tick yourself or linked sessions. A linked session's status says `· auto`: it follows the session. Pick a status by hand only to override it.
 - **Unfold a session** (the arrow on the right) to see its step list, what it was started with, its branch and cost.
 - A session that is **waiting on you** shows its question on the card. **Open in Claude** takes you to that session; **Mark handled** clears it until the session asks again.
-- **Start a session** opens Claude's new-session page with a brief for this card in the prompt box (it also copies the brief, in case the page opens empty). The new session reads the card and links itself to it.
+- **Start a session** opens Claude's new-session page in the folder of the card's **Project**, with a brief for this card in the prompt box (it also copies the brief, in case the page opens empty). The folder is the one earlier sessions of that project ran in; for a project no session has run in yet, you pick the folder in Claude. The new session reads the card and links itself to it.
 - **Link sessions…** adds existing sessions to the card.
 
 Further down the card:
@@ -199,7 +199,7 @@ taskboard uninstall --purge  # also deletes the board
 ## Development
 
 ```bash
-npm test                     # 14 tests, against fake Claude folders in a temp directory
+npm test                     # 15 tests, against fake Claude folders in a temp directory
 ```
 
 ```bash

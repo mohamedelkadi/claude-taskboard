@@ -161,7 +161,7 @@ function drawerHtml(card) {
       <select class="field" data-change="card-status" data-keep="card-status" title="Column">${d.columns.map((c) => `<option value="${esc(c.id)}"${c.id === card.status ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
       <select class="field" data-change="card-priority" data-keep="card-priority" title="Priority">${Object.entries(PRIO_LABEL).map(([k, l]) => `<option value="${k}"${k === card.priority ? ' selected' : ''}>${l}</option>`).join('')}</select>
       <span class="grow"></span>
-      <button class="btn small primary" data-act="start-session" title="Open a new Claude session with this card's brief already in the prompt box">Start a session</button>
+      <button class="btn small primary" data-act="start-session" title="${card.view.folder ? `Open a new Claude session in ${esc(shortPath(card.view.folder))}, with this card's brief already in the prompt box` : `Open a new Claude session with this card's brief already in the prompt box. No folder is known for this card's project yet, so you pick it in Claude`}">Start a session</button>
       <button class="btn small ghost" data-act="copy-brief" title="Copy the brief instead, to paste into a session yourself">Copy brief</button>
       <button class="btn small ghost" data-act="card-archive">${card.archived ? 'Restore' : 'Archive'}</button>
       <button class="btn small ghost danger" data-act="card-delete">Delete</button>
@@ -384,7 +384,11 @@ ACTIONS['start-session'] = async () => {
   const j = await post('/api/new-session', { card: card.key }).catch(() => null);
   if (!j || !j.ok) return toast((j && j.error) || 'Could not open the Claude app.', 'error');
   await copyText(j.brief); // so it can be pasted if Claude opens without it
-  toast('Claude is opening a new session with the brief filled in (it is on your clipboard too). Pick the folder, finish the sentence, send.');
+  toast(
+    j.folder
+      ? `Claude is opening a new session in ${shortPath(j.folder)} with the brief filled in (it is on your clipboard too). Finish the sentence and send.`
+      : `Claude is opening a new session with the brief filled in (it is on your clipboard too). No folder is known for ${card.project ? `“${card.project}”` : 'this card'} yet, so pick the folder in Claude before you send.`
+  );
 };
 ACTIONS['copy-brief'] = async () => {
   const card = currentCard();

@@ -81,6 +81,7 @@ test('the launcher endpoints: summary for the menu bar, brief for a new session'
   const brief = await request('POST', '/api/new-session', { body: { card: key, copyOnly: true }, headers: { 'content-type': 'application/json' } });
   assert.match(brief.json.brief, new RegExp(`^Work on Taskboard card ${key} "Brief me"\\.`));
   assert.match(brief.json.brief, /board_link_session/);
+  assert.equal(brief.json.folder, '', 'a card with no project and no sessions has no folder');
   const missing = await request('POST', '/api/new-session', { body: { card: 'nope' }, headers: { 'content-type': 'application/json' } });
   assert.equal(missing.status, 400);
 });

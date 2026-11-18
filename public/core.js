@@ -36,6 +36,8 @@ const $$ = (sel, root) => [...(root || document).querySelectorAll(sel)];
 
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ESC[c]);
+/** A folder the way people write it: ~/work/app rather than /Users/name/work/app. */
+const shortPath = (p) => String(p || '').replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, '~');
 
 const STATE_LABEL = { running: 'Running', needs_you: 'Needs you', review: 'Ready for review', done: 'Done', idle: 'Idle' };
 const SUB_LABEL = { todo: 'To do', in_progress: 'In progress', blocked: 'Blocked', review: 'In review', done: 'Done' };
@@ -174,7 +176,8 @@ function toast(text, kind) {
   el.className = 'toast' + (kind ? ' ' + kind : '');
   el.textContent = text;
   $('#toasts').appendChild(el);
-  setTimeout(() => el.remove(), kind === 'error' ? 6000 : 2600);
+  // long enough to read: a sentence that names a folder needs more than a glance
+  setTimeout(() => el.remove(), kind === 'error' ? 6000 : Math.max(2600, text.length * 45));
 }
 
 async function post(path, body) {
