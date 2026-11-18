@@ -25,6 +25,7 @@ module.exports = {
   CARDS_DIR: path.join(DATA_DIR, 'cards'),
   OVERVIEW_FILE: path.join(DATA_DIR, 'BOARD.md'),
   CACHE_DIR: path.join(DATA_DIR, 'cache'),
+  DIARY_DIR: path.join(DATA_DIR, 'diary'),
   LOG_FILE: path.join(DATA_DIR, 'server.log'),
   PID_FILE: path.join(DATA_DIR, 'server.pid'),
   // read from Claude (never written)
@@ -32,5 +33,6 @@ module.exports = {
   DESKTOP_CONFIG: path.join(DESKTOP_DIR, 'claude_desktop_config.json'),
   PROJECTS_DIR: path.join(CLAUDE_DIR, 'projects'),
   LIVE_DIR: path.join(CLAUDE_DIR, 'sessions'),
+  HISTORY_FILE: path.join(CLAUDE_DIR, 'history.jsonl'),
   boardUrl: (hash) => `http://127.0.0.1:${PORT}/${hash ? '#' + hash : ''}`,
 };

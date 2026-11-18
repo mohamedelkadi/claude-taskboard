@@ -145,6 +145,44 @@ test('sub-tasks, connections, notes and columns', () => {
   assert.ok(!store.load().cards.some((c) => c.links.some((l) => l.to === b.id)));
 });
 
+test('a new session starts in the folder of the card\'s project', () => {
+  const dir = (name) => {
+    const d = path.join(fx.root, 'code', name);
+    fs.mkdirSync(d, { recursive: true });
+    return d;
+  };
+  const api = dir('shop-api');
+  const web = dir('shop-web');
+  const other = path.join(dir('elsewhere'), 'shop-api'); // a second folder with the same name
+  fs.mkdirSync(other);
+  const sessions = [
+    { id: 's1', project: api, projectName: 'shop-api', lastActivityAt: 10 },
+    { id: 's2', project: web, projectName: 'shop-web', lastActivityAt: 30 },
+    { id: 's3', project: other, projectName: 'shop-api', lastActivityAt: 20 },
+    { id: 's4', project: '(no folder)', projectName: 'No folder', lastActivityAt: 40 },
+    { id: 's5', project: path.join(fx.root, 'code', 'deleted'), projectName: 'deleted', lastActivityAt: 50 },
+  ];
+  const folderOf = view.folderResolver(sessions);
+  const sub = (id) => ({ sessionId: id });
+
+  // the bug this fixes: a card for one project whose only session was started in another folder
+  assert.equal(folderOf({ project: 'shop-web', subtasks: [sub('s1')] }), web, 'the project named on the card wins over where its sessions ran');
+  assert.equal(folderOf({ project: 'Shop-API', subtasks: [] }), other, 'same name twice: the folder used last');
+  assert.equal(folderOf({ project: 'shop-api', subtasks: [sub('s1')] }), api, 'same name twice: the folder this card already uses');
+  assert.equal(folderOf({ project: '', subtasks: [sub('s2'), sub('s4')] }), web, 'no project on the card: where its sessions ran');
+  assert.equal(folderOf({ project: 'never-seen', subtasks: [] }), '', 'a project no session has run in');
+  assert.equal(folderOf({ project: 'deleted', subtasks: [sub('s5')] }), '', 'a folder that is gone');
+  assert.equal(folderOf({ project: '', subtasks: [sub('s4')] }), '', 'sessions with no folder');
+
+  const brief = view.sessionBrief({ key: 'TB-1', title: 'Saved cards' }, web);
+  assert.ok(brief.includes(`in the project folder ${web} (`));
+  const url = new URL(view.newSessionUrl(brief, '/Users/me/My Work /app'));
+  assert.equal(url.protocol + '//' + url.host + url.pathname, 'claude://code/new');
+  assert.equal(url.searchParams.get('folder'), '/Users/me/My Work /app');
+  assert.equal(url.searchParams.get('q'), brief);
+  assert.equal(new URL(view.newSessionUrl('hi', '')).searchParams.has('folder'), false);
+});
+
 test('card files are written for Claude and removed with the card', () => {
   view.exportMarkdown(state());
   const a = store.findCard(store.load(), 'A');

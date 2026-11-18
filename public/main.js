@@ -103,8 +103,11 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key === 'n') {
     e.preventDefault();
     ACTIONS['new-card']({ dataset: {} });
-  } else if ('1234'.includes(e.key)) {
-    S.view = ['board', 'needs', 'sessions', 'graph'][+e.key - 1];
+  } else if (S.view === 'diary' && !S.cardId && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    e.preventDefault();
+    diaryStep(e.key === 'ArrowLeft' ? -1 : 1);
+  } else if ('12345'.includes(e.key)) {
+    S.view = ['board', 'needs', 'sessions', 'graph', 'diary'][+e.key - 1];
     setHash();
     render();
   }
@@ -120,10 +123,16 @@ function connect() {
   es.onmessage = (e) => {
     S.connected = true;
     let v = 0;
+    let diary = 0;
     try {
-      v = JSON.parse(e.data).version;
+      const j = JSON.parse(e.data);
+      v = j.version;
+      diary = j.diary || 0;
     } catch (_) {}
+    const news = diary > S.diary.latest; // the Diary view fetches again when it is the one showing
+    if (news) S.diary.latest = diary;
     if (!S.data || v !== S.data.version) loadState().catch(() => {});
+    else if (news && S.view === 'diary') render();
     else renderTop();
   };
   es.onerror = () => {

@@ -26,6 +26,8 @@ const SHOTS = [
   { name: 'needs-me', hash: 'needs', width: 1440, height: 700 },
   { name: 'sessions', hash: 'sessions', width: 1440, height: 860, run: `S.sessScope = 'all'; renderWhenSafe()` },
   { name: 'connections', hash: 'graph', width: 1440, height: 760, settle: 4000 },
+  { name: 'diary', hash: 'diary', width: 1440, height: 900, settle: 1500 },
+  { name: 'diary-search', hash: 'diary', width: 1440, height: 760, run: `S.q = 'card'; document.getElementById('q').value = 'card'; renderMain()`, settle: 1800 },
   { name: 'board-light', hash: '', width: 1440, height: 760, theme: 'light' },
   { name: 'in-claude-pane', hash: 'needs', width: 420, height: 860 },
 ];

@@ -71,6 +71,48 @@ function effectiveSub(sub, ctx) {
  * Everything the UI, the MCP tools and the CLI show, computed in one place.
  * `scanResult` is what claude.scan() returned.
  */
+/**
+ * Where a new session for a card should start. Returns card => folder ('' when
+ * unknown). A card names its project ("shop-api"), not a path, so the folder is
+ * the one sessions of that project have run in; a card with no such project
+ * falls back to where its own sessions ran. Without this, Claude opens the new
+ * session in whichever folder was used last.
+ */
+function folderResolver(sessions) {
+  const roots = new Map(); // folder -> { root, name, last }
+  for (const s of sessions) {
+    if (!s.project || !path.isAbsolute(s.project)) continue; // "(no folder)" sessions have none
+    let r = roots.get(s.project);
+    if (!r) roots.set(s.project, (r = { root: s.project, name: String(s.projectName || '').toLowerCase(), last: 0 }));
+    if (s.lastActivityAt > r.last) r.last = s.lastActivityAt;
+  }
+  const byId = new Map(sessions.map((s) => [s.id, s]));
+  const checked = new Map();
+  const isDir = (dir) => {
+    if (!checked.has(dir)) {
+      let ok = false;
+      try {
+        ok = fs.statSync(dir).isDirectory();
+      } catch (_) {}
+      checked.set(dir, ok);
+    }
+    return checked.get(dir);
+  };
+  return (card) => {
+    const own = new Map(); // folder -> how many of the card's sessions ran there
+    for (const sub of card.subtasks || []) {
+      const s = sub.sessionId && byId.get(sub.sessionId);
+      if (s && roots.has(s.project)) own.set(s.project, (own.get(s.project) || 0) + 1);
+    }
+    const wanted = String(card.project || '').trim().toLowerCase();
+    const named = wanted ? [...roots.values()].filter((r) => r.name === wanted) : [];
+    // two folders can share a name: prefer the one this card's sessions use, then the latest used
+    const pool = (named.length ? named : [...own.keys()].map((k) => roots.get(k))).filter((r) => isDir(r.root));
+    pool.sort((a, b) => (own.get(b.root) || 0) - (own.get(a.root) || 0) || b.last - a.last);
+    return pool.length ? pool[0].root : '';
+  };
+}
+
 function buildState(board, scanResult) {
   const meta = board.sessionMeta;
   const sessions = scanResult.sessions;
@@ -84,6 +126,7 @@ function buildState(board, scanResult) {
   const routines = buildRoutines(sessions);
   const ctx = { byId, routines };
   const routineCard = new Map();
+  const folderOf = folderResolver(sessions);
 
   const cards = board.cards.map((card) => {
     const subs = card.subtasks.map((sub) => effectiveSub(sub, ctx));
@@ -105,7 +148,7 @@ function buildState(board, scanResult) {
       for (const t of s.tickets) tickets.add(t);
       if (s.lastActivityAt > lastActivityAt) lastActivityAt = s.lastActivityAt;
     }
-    return { ...card, view: { subs, counts, prs: [...prs.values()], tickets: [...tickets], lastActivityAt: lastActivityAt || card.updatedAt } };
+    return { ...card, view: { subs, counts, prs: [...prs.values()], tickets: [...tickets], lastActivityAt: lastActivityAt || card.updatedAt, folder: folderOf(card) } };
   });
 
   // Connections nobody drew but the sessions imply.
@@ -395,7 +438,9 @@ function cardMarkdown(card, state) {
   if (card.ticket) head.push(`Ticket: ${card.ticket}`);
   if (card.due) head.push(`Due: ${card.due}`);
   if (card.tags.length) head.push(`Tags: ${card.tags.join(', ')}`);
-  L.push(head.join(' · '), `Board: ${P.boardUrl('card=' + card.key)}`, `Updated: ${fmtDate(card.updatedAt)}`, '');
+  L.push(head.join(' · '));
+  if (v.folder) L.push(`Project folder: ${v.folder}`);
+  L.push(`Board: ${P.boardUrl('card=' + card.key)}`, `Updated: ${fmtDate(card.updatedAt)}`, '');
   if (card.description.trim()) L.push('## Description', '', card.description.trim(), '');
   L.push(`## Sub-tasks (${v.counts.done}/${v.counts.total} done)`, '');
   if (!v.subs.length) L.push('_None yet._');
@@ -459,8 +504,17 @@ function overviewMarkdown(state) {
 }
 
 /** The opening prompt for a new Claude session that is going to work on a card. */
-function sessionBrief(card) {
-  return `Work on Taskboard card ${card.key} "${card.title}".\n\nFirst read the card with board_get_card (card: "${card.key}"), or the file ~/.claude/taskboard/cards/${card.key}.md, and link this session to it with board_link_session. Then: `;
+/** The prompt a new session for a card starts with; `folder` is where the card's project lives, when known. */
+function sessionBrief(card, folder) {
+  // The folder is also on the link that opens Claude; saying it here lets the
+  // session notice if it was started somewhere else all the same.
+  const where = folder ? ` in the project folder ${folder} (if this session is in a different folder, tell me before doing anything else)` : '';
+  return `Work on Taskboard card ${card.key} "${card.title}"${where}.\n\nFirst read the card with board_get_card (card: "${card.key}"), or the file ~/.claude/taskboard/cards/${card.key}.md, and link this session to it with board_link_session. Then: `;
+}
+
+/** The link that opens Claude's new-session page with the brief in the prompt box, in `folder` when given. */
+function newSessionUrl(brief, folder) {
+  return `claude://code/new?${folder ? `folder=${encodeURIComponent(folder)}&` : ''}q=${encodeURIComponent(brief)}`;
 }
 
 function writeIfChanged(file, text) {
@@ -489,6 +543,6 @@ function exportMarkdown(state) {
 }
 
 module.exports = {
-  buildState, planAutoLinks, applyAutoLinks, seed, exportMarkdown, cardMarkdown, overviewMarkdown, sessionBrief,
+  buildState, planAutoLinks, applyAutoLinks, seed, exportMarkdown, cardMarkdown, overviewMarkdown, sessionBrief, newSessionUrl, folderResolver,
   effectiveState, ackToken, inferStatus, SUB_LABEL, STATE_LABEL, fmtDate,
 };
