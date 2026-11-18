@@ -9,6 +9,7 @@ const P = require('./paths');
 const store = require('./store');
 const claude = require('./claude');
 const view = require('./view');
+const diary = require('./diary');
 const daemon = require('./daemon');
 const macapp = require('./macapp');
 
@@ -32,6 +33,8 @@ const HELP = `taskboard — a kanban board over your Claude sessions
   taskboard link <card> [session-id]        link a session (default: the Claude session running this)
   taskboard connect <from> <to> [blocks|relates|parent]
   taskboard sessions [query] [--unsorted]   find sessions
+  taskboard diary [today|yesterday|YYYY-MM-DD] [--days 7] [--project name]   what you did
+  taskboard diary --search "<words>"         search every day
   taskboard app [--remove]      build the Mac app into ~/Applications (needs Xcode's Swift)
   taskboard doctor              check the installation
   taskboard install | uninstall [--purge]   (uninstall keeps your board unless --purge)
@@ -144,7 +147,7 @@ async function uninstall(purge) {
   } else {
     fs.rmSync(APP_DIR, { recursive: true, force: true });
     fs.rmSync(P.CACHE_DIR, { recursive: true, force: true });
-    console.log(`Removed the app and its Claude integration. Your board is kept in ${P.BOARD_FILE}.`);
+    console.log(`Removed the app and its Claude integration. Your board and diary are kept in ${P.DATA_DIR}.`);
   }
 }
 
@@ -163,6 +166,8 @@ async function doctor() {
   ok(macapp.installed(), `Mac app at ${macapp.APP}${macapp.installed() && macapp.isRunning() ? ' (running)' : ''}`, macapp.available() ? 'run: taskboard app' : 'needs Xcode; the board still works in the browser');
   const scan = claude.scan();
   console.log(`     ${scan.sessions.length} sessions found, ${scan.sessions.filter((s) => !s.archived).length} not archived, ${scan.groups.length} sidebar groups`);
+  const kept = diary.stats();
+  console.log(`     diary: ${kept.days} days, ${Math.max(1, Math.round(kept.bytes / 1024))} KB in ${P.DIARY_DIR}`);
   if (up && up.error) console.log(`     last scan error: ${up.error}`);
 }
 
@@ -267,6 +272,13 @@ async function main() {
         console.log(`${s.id}  ${view.STATE_LABEL[s.estate].padEnd(16)} ${s.title.slice(0, 60).padEnd(60)} ${card ? card.key : '-'}`);
       }
       return;
+    }
+    case 'diary': {
+      const day = a.length ? diary.parseDay(a[0]) : '';
+      if (a.length && !day) throw new store.UserError('Give the day as today, yesterday or YYYY-MM-DD.');
+      const state = snapshot();
+      diary.setNotes(store.load().dayNotes);
+      return console.log(diary.markdown({ day, days: f.days, q: typeof f.search === 'string' ? f.search : '', project: f.project }, state));
     }
     case 'path':
       return console.log(P.DATA_DIR);

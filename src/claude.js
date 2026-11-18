@@ -449,6 +449,51 @@ function detailIsStale(cliId) {
 }
 
 /**
+ * Hand every complete line of `file` between byte `from` and byte `size` to
+ * `onLine` (as a Buffer). Returns where the next read should start: an
+ * unfinished last line is left for next time.
+ */
+async function readLines(file, from, size, onLine) {
+  const fh = await fsp.open(file, 'r');
+  let offset = from;
+  try {
+    const CHUNK = 1 << 20;
+    const buf = Buffer.allocUnsafe(CHUNK);
+    let pos = from;
+    let parts = [];
+    let partsLen = 0;
+    while (pos < size) {
+      const { bytesRead } = await fh.read(buf, 0, Math.min(CHUNK, size - pos), pos);
+      if (!bytesRead) break;
+      const chunk = buf.subarray(0, bytesRead);
+      let start = 0;
+      for (;;) {
+        const nl = chunk.indexOf(10, start);
+        if (nl === -1) break;
+        let line = chunk.subarray(start, nl);
+        if (parts.length) {
+          parts.push(Buffer.from(line));
+          line = Buffer.concat(parts);
+          parts = [];
+          partsLen = 0;
+        }
+        onLine(line);
+        start = nl + 1;
+      }
+      if (start < bytesRead) {
+        parts.push(Buffer.from(chunk.subarray(start)));
+        partsLen += bytesRead - start;
+      }
+      pos += bytesRead;
+      offset = pos - partsLen;
+    }
+  } finally {
+    await fh.close();
+  }
+  return offset;
+}
+
+/**
  * Read a transcript for its step list, last recap and prompts. Transcripts are
  * append-only and can be hundreds of MB, so this continues from where the
  * previous read stopped and only decodes the few lines that matter.
@@ -465,41 +510,7 @@ async function scanTranscript(cliId) {
   let d = cachedDetail(cliId);
   if (d && d.size === st.size && d.mtimeMs === st.mtimeMs) return d;
   if (!d || d.offset > st.size) d = freshDetail();
-  const fh = await fsp.open(file, 'r');
-  try {
-    const CHUNK = 1 << 20;
-    const buf = Buffer.allocUnsafe(CHUNK);
-    let pos = d.offset;
-    let parts = [];
-    let partsLen = 0;
-    while (pos < st.size) {
-      const { bytesRead } = await fh.read(buf, 0, Math.min(CHUNK, st.size - pos), pos);
-      if (!bytesRead) break;
-      const chunk = buf.subarray(0, bytesRead);
-      let from = 0;
-      for (;;) {
-        const nl = chunk.indexOf(10, from);
-        if (nl === -1) break;
-        let line = chunk.subarray(from, nl);
-        if (parts.length) {
-          parts.push(Buffer.from(line));
-          line = Buffer.concat(parts);
-          parts = [];
-          partsLen = 0;
-        }
-        handleLine(line, d);
-        from = nl + 1;
-      }
-      if (from < bytesRead) {
-        parts.push(Buffer.from(chunk.subarray(from)));
-        partsLen += bytesRead - from;
-      }
-      pos += bytesRead;
-      d.offset = pos - partsLen; // an unfinished last line is re-read next time
-    }
-  } finally {
-    await fh.close();
-  }
+  d.offset = await readLines(file, d.offset, st.size, (line) => handleLine(line, d));
   d.size = st.size;
   d.mtimeMs = st.mtimeMs;
   detailMem.set(cliId, d);
@@ -603,4 +614,5 @@ async function sessionDetail(session) {
 module.exports = {
   scan, sessionDetail, scanTranscript, detailIsStale, cachedDetail, currentSession, readLive, readSidebarGroups,
   projectOf, ticketsIn, ticketsInBranch, cleanPrompt, trimText, applyPlanCall, freshDetail, handleLine, stateOf,
+  indexTranscripts, readLines,
 };

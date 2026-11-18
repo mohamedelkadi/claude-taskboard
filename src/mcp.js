@@ -7,10 +7,11 @@ const P = require('./paths');
 const store = require('./store');
 const claude = require('./claude');
 const view = require('./view');
+const diary = require('./diary');
 
 const PROTOCOLS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
-const INSTRUCTIONS = `Taskboard is the user's personal kanban board. Each card is a task; its sub-tasks are either plain checklist items or Claude sessions, whose status the board follows on its own. Use board_overview to see the board and which card this session belongs to, board_get_card for one card in full, and the other board_* tools to change it. A card is named by its key (TB-12) or its title. Board in the browser: ${P.boardUrl()}`;
+const INSTRUCTIONS = `Taskboard is the user's personal kanban board. Each card is a task; its sub-tasks are either plain checklist items or Claude sessions, whose status the board follows on its own. Use board_overview to see the board and which card this session belongs to, board_get_card for one card in full, and the other board_* tools to change it. A card is named by its key (TB-12) or its title. board_diary answers what the user worked on, day by day, and searches every day, including sessions since archived or deleted. Board in the browser: ${P.boardUrl()}`;
 
 const str = { type: 'string' };
 const CARD = { type: 'string', description: 'Card key (TB-12) or title. Omit to mean the card this session is linked to.' };
@@ -114,6 +115,25 @@ const TOOLS = [
         limit: { type: 'number', description: 'Default 25.' },
       },
     },
+  },
+  {
+    name: 'board_diary',
+    description: "The user's work diary: what they did in Claude on a day (what they asked, what was reported back, commits, pull requests, files), or a search across every day. It reaches back further than Claude's own sessions and includes archived and deleted ones. Use it for \"what did I do yesterday\", \"what did I work on last week\", \"when did I fix X\", and to write a standup or weekly summary. Give date (and days to look further back), or query to search.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'YYYY-MM-DD, "today" or "yesterday". Default: today.' },
+        days: { type: 'number', description: 'How many days to show, counting back from date. Default 1, at most 31.' },
+        query: { type: 'string', description: 'Words to search for across all days. All must match; "quoted phrases" stay together.' },
+        project: { type: 'string', description: 'Only this project (the folder name, as shown on the board).' },
+        limit: { type: 'number', description: 'For a search: how many matches to show. Default 25.' },
+      },
+    },
+  },
+  {
+    name: 'board_diary_note',
+    description: "Add a line to the user's own diary note for a day: a decision, a number, or what to pick up tomorrow, when it is not about one card. For context about a card, use board_add_note instead.",
+    inputSchema: { type: 'object', required: ['text'], properties: { text: str, date: { type: 'string', description: 'YYYY-MM-DD, "today" or "yesterday". Default: today.' } } },
   },
 ];
 
@@ -292,6 +312,22 @@ const HANDLERS = {
       L.push(line);
     }
     return L.join('\n');
+  },
+
+  board_diary(a) {
+    const day = a.date ? diary.parseDay(a.date) : '';
+    if (a.date && !day) throw new store.UserError('Give the date as YYYY-MM-DD, "today" or "yesterday".');
+    const { state } = snapshot();
+    diary.refresh(); // the web server keeps the diary; read what it has written by now
+    diary.setNotes(store.load().dayNotes);
+    return diary.markdown({ day, days: a.days, q: a.query, project: a.project, limit: a.limit }, state);
+  },
+
+  board_diary_note(a) {
+    const day = diary.parseDay(a.date);
+    if (!day) throw new store.UserError('Give the date as YYYY-MM-DD, "today" or "yesterday".');
+    store.apply('diary.note', { day, text: a.text, append: true });
+    return `Added to the diary note for ${day}.`;
   },
 };
 

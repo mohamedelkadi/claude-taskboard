@@ -11,6 +11,7 @@ const P = require('./paths');
 const store = require('./store');
 const claude = require('./claude');
 const view = require('./view');
+const diary = require('./diary');
 
 const PUBLIC = path.join(__dirname, '..', 'public');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
@@ -22,6 +23,7 @@ let stateJson = '{}';
 let stateHash = '';
 let version = 0;
 let lastError = '';
+let announced = '';
 const clients = new Set();
 
 function log(...a) {
@@ -50,29 +52,40 @@ function summary() {
   };
 }
 
-function broadcast() {
-  const msg = `data: ${JSON.stringify({ version })}\n\n`;
-  for (const res of clients) res.write(msg);
+/** What open pages compare against what they have: the board's version and the diary's. */
+const versions = () => JSON.stringify({ version, diary: diary.rev() });
+
+/** Tell open pages that the board or the diary changed. Says nothing when neither did. */
+function announce() {
+  const now = versions();
+  if (now === announced) return;
+  announced = now;
+  for (const res of clients) res.write(`data: ${now}\n\n`);
 }
 
 /** Recompute what the UI shows; tell open pages only if something changed. */
 function rebuild() {
-  const next = view.buildState(store.load(), scanResult);
+  const board = store.load();
+  const next = view.buildState(board, scanResult);
   const { generatedAt, scannedAt, ...stable } = next;
   const hash = crypto.createHash('md5').update(JSON.stringify(stable)).digest('hex');
-  if (hash === stateHash && state) {
+  const changed = hash !== stateHash || !state;
+  if (changed) {
+    stateHash = hash;
+    version += 1;
+    next.version = version;
+    state = next;
+    stateJson = JSON.stringify(next);
+    view.exportMarkdown(next);
+  } else {
     state.generatedAt = generatedAt;
     state.scannedAt = scannedAt;
-    return false;
   }
-  stateHash = hash;
-  version += 1;
-  next.version = version;
-  state = next;
-  stateJson = JSON.stringify(next);
-  view.exportMarkdown(next);
-  broadcast();
-  return true;
+  // the diary remembers each session's title, project and card for when Claude no longer has it
+  diary.setNotes(board.dayNotes);
+  diary.sync(state);
+  announce();
+  return changed;
 }
 
 function rescan() {
@@ -87,6 +100,7 @@ function rescan() {
     rebuild();
     lastError = '';
     crawl();
+    diary.crawl(announce).catch((e) => log('diary:', e.message));
   } catch (e) {
     lastError = e.message;
     log('scan failed:', e.message);
@@ -200,7 +214,7 @@ async function handle(req, res) {
     if (p === '/api/summary') return json(res, 200, summary());
     if (p === '/api/events') {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
-      res.write(`data: ${JSON.stringify({ version })}\n\n`);
+      res.write(`data: ${versions()}\n\n`);
       clients.add(res);
       req.on('close', () => clients.delete(res));
       return;
@@ -209,6 +223,11 @@ async function handle(req, res) {
       const s = scanResult.sessions.find((x) => x.id === url.searchParams.get('id'));
       if (!s) return json(res, 404, { ok: false, error: 'No such session.' });
       return json(res, 200, { ok: true, session: s, detail: await claude.sessionDetail(s) });
+    }
+    if (p === '/api/diary') {
+      if (!state) return json(res, 503, { ok: false, error: 'The board is still starting.' });
+      const arg = (name, max) => (url.searchParams.get(name) || '').slice(0, max);
+      return json(res, 200, diary.page({ day: arg('day', 10), q: arg('q', 200), project: arg('project', 200) }, state));
     }
     if (p === '/api/export') {
       res.writeHead(200, { 'content-type': 'application/json', 'content-disposition': 'attachment; filename="taskboard-board.json"' });

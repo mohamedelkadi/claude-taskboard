@@ -99,6 +99,24 @@ test('the server only answers local, same-origin requests', async () => {
   assert.equal(open.status, 400);
 });
 
+test('the diary is served, with its notes, and says when it changed', async () => {
+  const d = await request('GET', '/api/diary');
+  assert.equal(d.status, 200);
+  assert.equal(d.json.ok, true);
+  assert.ok(d.json.days.length >= 1, 'sessions with no transcript still give their day');
+  assert.ok(d.json.day.sessions.some((s) => s.title === 'Archived thing' && s.archived), 'archived sessions included');
+  assert.ok(d.json.stats.bytes > 0 && d.json.stats.bytes < 20000, 'a few short notes per session');
+
+  const noted = await op('diary.note', { day: d.json.today, text: 'From the test' });
+  assert.equal(noted.json.ok, true);
+  const again = await request('GET', `/api/diary?day=${d.json.today}`);
+  assert.equal(again.json.day.note, 'From the test');
+  assert.ok(again.json.v > d.json.v, 'open pages are told the diary changed');
+  const found = await request('GET', '/api/diary?q=' + encodeURIComponent('"from the test"'));
+  assert.equal(found.json.results.total, 1);
+  assert.equal(found.json.results.items[0].note, 'From the test');
+});
+
 test('the MCP server lists its tools and changes the board', async () => {
   const mcp = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'mcp.js')], { env: process.env, stdio: ['pipe', 'pipe', 'inherit'] });
   const replies = new Map();
@@ -128,7 +146,7 @@ test('the MCP server lists its tools and changes the board', async () => {
 
     const list = await call('tools/list', {});
     const names = list.result.tools.map((t) => t.name);
-    assert.ok(names.includes('board_overview') && names.includes('board_link_session'));
+    assert.ok(names.includes('board_overview') && names.includes('board_link_session') && names.includes('board_diary'));
     assert.ok(list.result.tools.every((t) => t.description && t.inputSchema && t.inputSchema.type === 'object'));
 
     // this test process is not a Claude session, so nothing is linked by default
@@ -149,6 +167,16 @@ test('the MCP server lists its tools and changes the board', async () => {
 
     const found = await tool('board_find_sessions', { state: 'needs_you' });
     assert.match(found.content[0].text, /PROJ-100 search root/);
+
+    const jotted = await tool('board_diary_note', { text: 'Remember the feature flag' });
+    assert.match(jotted.content[0].text, /^Added to the diary note for \d{4}-\d{2}-\d{2}\.$/);
+    const today = await tool('board_diary', {});
+    assert.match(today.content[0].text, /Note: From the test\nRemember the feature flag/, 'a note added by Claude follows the one typed in the page');
+    assert.match(today.content[0].text, /## \d\d:\d\d–\d\d:\d\d · PROJ-100 search root · app/);
+    const hit = await tool('board_diary', { query: 'feature flag' });
+    assert.match(hit.content[0].text, /^1 match for "feature flag" on 1 day/);
+    const badDate = await tool('board_diary', { date: 'someday' });
+    assert.equal(badDate.isError, true);
 
     const noCard = await tool('board_get_card', {});
     assert.equal(noCard.isError, true);

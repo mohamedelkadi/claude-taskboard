@@ -3,7 +3,7 @@
 
 const S = {
   data: null,
-  view: 'board', // board | needs | sessions | graph
+  view: 'board', // board | needs | sessions | graph | diary
   q: '',
   project: '',
   cardId: null, // card open in the drawer
@@ -20,6 +20,20 @@ const S = {
   sessState: '',
   showArchived: false,
   graph: { sessions: false, hideDone: true },
+  diary: {
+    day: '', // the day shown; '' is the latest one with something in it
+    month: '', // the calendar's month, when it is not the shown day's
+    data: null, // the last answer from /api/diary
+    key: '', // what that answer was for
+    asked: '', // the last request that finished, so a failed one is not repeated forever
+    pending: '',
+    v: 0, // the diary version of that answer, and the latest one the server announced
+    latest: 0,
+    req: 0,
+    timer: null,
+    open: new Set(), // sessions shown in full
+    wide: new Set(), // long entries shown in full
+  },
   drag: null,
   swapping: false,
   pointerDown: false,
@@ -296,6 +310,7 @@ function renderTop() {
         <button class="tab" data-act="view" data-view="needs">Needs me <span class="pill needs" id="n-needs"></span></button>
         <button class="tab" data-act="view" data-view="sessions">Sessions <span class="pill" id="n-unsorted" title="Open sessions that are not on a card"></span></button>
         <button class="tab" data-act="view" data-view="graph">Connections</button>
+        <button class="tab" data-act="view" data-view="diary">Diary</button>
       </nav>
       <div class="grow"></div>
       <span class="conn-lost" id="conn-lost" hidden>Board server not reachable</span>
@@ -321,6 +336,7 @@ function renderTop() {
   }
   sel.value = x.projects.includes(S.project) ? S.project : '';
   $('#conn-lost').hidden = S.connected;
+  $('#q').placeholder = S.view === 'diary' ? 'Search the diary  /' : 'Search cards and sessions  /';
 }
 
 function renderMain() {
@@ -328,6 +344,7 @@ function renderMain() {
   if (S.view === 'needs') return swap(main, renderNeeds());
   if (S.view === 'sessions') return swap(main, renderSessions());
   if (S.view === 'graph') return renderGraph(main);
+  if (S.view === 'diary') return swap(main, renderDiary());
   return swap(main, renderBoard());
 }
 
@@ -341,14 +358,20 @@ function render() {
 
 function setHash() {
   const card = S.cardId && ix().cards.get(S.cardId);
-  const h = card ? `card=${card.key}` : S.view === 'board' ? '' : S.view;
+  const h = card ? `card=${card.key}` : S.view === 'board' ? '' : S.view === 'diary' && S.diary.day ? `diary=${S.diary.day}` : S.view;
   if (location.hash.replace(/^#/, '') !== h) history.replaceState(null, '', h ? `#${h}` : location.pathname);
 }
 
 function readHash() {
   const h = decodeURIComponent(location.hash.replace(/^#/, ''));
   const m = /^card=(.+)$/.exec(h);
-  if (m && S.data) {
+  const day = /^diary(?:=(\d{4}-\d{2}-\d{2}))?$/.exec(h);
+  if (day) {
+    S.view = 'diary';
+    S.cardId = null;
+    S.diary.day = day[1] || '';
+    S.diary.month = '';
+  } else if (m && S.data) {
     const card = S.data.cards.find((c) => c.key.toLowerCase() === m[1].toLowerCase() || c.id === m[1]);
     if (card) S.cardId = card.id;
   } else if (['needs', 'sessions', 'graph', 'board'].includes(h)) {

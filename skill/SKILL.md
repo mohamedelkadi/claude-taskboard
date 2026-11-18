@@ -1,6 +1,6 @@
 ---
 name: board
-description: The user's Taskboard, a personal kanban board whose cards are tasks and whose sub-tasks are Claude sessions. Use when the user mentions the board, a card, or a key like TB-12; asks what they are working on, what is waiting on them, or what to pick up next; wants this session tracked or filed under a task ("add this to the board", "put this under the search card", "link this session"); wants a task's status changed ("move it to review", "mark TB-4 done", "this is blocked by the RFC card"); or opens a session by naming a card to work on.
+description: The user's Taskboard, a personal kanban board whose cards are tasks and whose sub-tasks are Claude sessions. Use when the user mentions the board, a card, or a key like TB-12; asks what they are working on, what is waiting on them, or what to pick up next; wants this session tracked or filed under a task ("add this to the board", "put this under the search card", "link this session"); wants a task's status changed ("move it to review", "mark TB-4 done", "this is blocked by the RFC card"); asks what they did on a day or when they worked on something ("what did I do yesterday", "write my standup", "when did I fix the export"); or opens a session by naming a card to work on.
 ---
 
 # Taskboard
@@ -13,7 +13,7 @@ The board is at http://127.0.0.1:4780/ and its data is in `~/.claude/taskboard/`
 
 When the user types `/board` on its own, or asks to see or open the board:
 
-1. Show it. In the Claude desktop app, open it beside the chat in the built-in browser pane: `mcp__Claude_Browser__preview_start` with `url: "http://localhost:4780"`. To land on one card or on what is waiting, follow with `mcp__Claude_Browser__navigate` to `http://localhost:4780/#card=TB-12` or `http://localhost:4780/#needs`. If those tools are not in this session, run `taskboard open` (or `taskboard open TB-12`), which brings up the Taskboard app.
+1. Show it. In the Claude desktop app, open it beside the chat in the built-in browser pane: `mcp__Claude_Browser__preview_start` with `url: "http://localhost:4780"`. To land on one card or on what is waiting, follow with `mcp__Claude_Browser__navigate` to `http://localhost:4780/#card=TB-12` `http://localhost:4780/#needs`, or `http://localhost:4780/#diary` for the diary (`#diary=2026-11-18` for one day). If those tools are not in this session, run `taskboard open` (or `taskboard open TB-12`), which brings up the Taskboard app.
 2. Then say where things stand in three or four lines from `board_overview`: what is in progress, how many sessions are waiting on the user and the most recent one or two, and which card this session is on. Do not dump the whole board.
 
 If the page does not load, run `taskboard start` and try again; `taskboard doctor` shows what is wrong.
@@ -33,10 +33,21 @@ Prefer the MCP tools. If they are listed as deferred, load them first with ToolS
 | Connect two cards | `mcp__taskboard__board_connect_cards` |
 | Leave context for the next session on the card | `mcp__taskboard__board_add_note` |
 | Find sessions by title, ticket or PR | `mcp__taskboard__board_find_sessions` |
+| What the user did on a day, or a search across every day | `mcp__taskboard__board_diary` |
+| Add a line to the user's own note for a day | `mcp__taskboard__board_diary_note` |
 
 Most tools take `card` as a key (`TB-12`) or a title, and default to the card this session is linked to.
 
-If the tools are not available, the same things work from the shell: `taskboard ls`, `taskboard show TB-12`, `taskboard add "<title>"`, `taskboard move TB-12 "In review"`, `taskboard sub TB-12 "<title>"`, `taskboard note TB-12 "<text>"`, `taskboard link TB-12`, `taskboard connect TB-12 TB-9 blocks`. Each card is also a readable file: `~/.claude/taskboard/cards/TB-12.md` (generated; do not edit it).
+If the tools are not available, the same things work from the shell: `taskboard ls`, `taskboard show TB-12`, `taskboard add "<title>"`, `taskboard move TB-12 "In review"`, `taskboard sub TB-12 "<title>"`, `taskboard note TB-12 "<text>"`, `taskboard link TB-12`, `taskboard connect TB-12 TB-9 blocks`. Each card is also a readable file: `~/.claude/taskboard/cards/TB-12.md` (generated; do not edit it). The diary from the shell: `taskboard diary yesterday`, `taskboard diary --days 7`, `taskboard diary --search "<words>"`.
+
+## The diary
+
+The board keeps a diary of the user's work in Claude: for each day, what they asked each session, what was reported back, the steps finished, commits, pull requests and files edited. It is short notes, not transcripts, and it still has the days of sessions that were archived or that Claude has deleted.
+
+- "What did I do yesterday / on Monday / last week": `board_diary` with `date` (and `days` for a span). Summarise by task, not by session, and lead with what got finished.
+- "When did I work on X", "find where I fixed Y": `board_diary` with `query`.
+- A standup or weekly summary: read the days with `board_diary`, then write it in the user's words. Say which day each item is from when it spans more than one.
+- Something the user wants remembered that is not about one card: `board_diary_note`.
 
 ## When working on a card
 

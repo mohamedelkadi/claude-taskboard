@@ -34,7 +34,8 @@ if arguments.contains("--login-status") {
 }
 if let i = arguments.firstIndex(of: "--login"), i + 1 < arguments.count {
     do {
-        if arguments[i + 1] == "on" { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+        // "on" and "off" change it; anything else ("status") only reports
+        if arguments[i + 1] == "on" { try SMAppService.mainApp.register() } else if arguments[i + 1] == "off" { try SMAppService.mainApp.unregister() }
         print(SMAppService.mainApp.status == .enabled ? "on" : "off")
         exit(0)
     } catch {
@@ -109,7 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         return true
     }
 
-    // taskboard://card/TB-3, taskboard://needs, taskboard://sessions, taskboard://graph
+    // taskboard://card/TB-3, taskboard://needs, taskboard://sessions, taskboard://graph, taskboard://diary
     func application(_ application: NSApplication, open urls: [URL]) {
         guard let url = urls.first, url.scheme == "taskboard" else { return }
         let place = url.host ?? ""
@@ -117,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let safe = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
         if place == "card", !key.isEmpty, key.unicodeScalars.allSatisfy({ safe.contains($0) }) {
             go("card=" + key)
-        } else if ["needs", "sessions", "graph", "board"].contains(place) {
+        } else if ["needs", "sessions", "graph", "diary", "board"].contains(place) {
             go(place)
         } else if webView != nil {
             showWindow()
@@ -381,7 +382,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     @objc private func reload() { loadAttempts = 0; if onBoard { webView.reload() } else { loadBoard() } }
-    @objc private func showView(_ sender: NSMenuItem) { go(["board", "needs", "sessions", "graph"][sender.tag]) }
+    @objc private func showView(_ sender: NSMenuItem) { go(["board", "needs", "sessions", "graph", "diary"][sender.tag]) }
     @objc private func zoomIn() { webView.pageZoom = min(2.0, webView.pageZoom + 0.1) }
     @objc private func zoomOut() { webView.pageZoom = max(0.6, webView.pageZoom - 0.1) }
     @objc private func zoomReset() { webView.pageZoom = 1 }
@@ -428,7 +429,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             system("Select All", #selector(NSText.selectAll(_:)), "a"),
         ])
         add("View", [
-            view("Board", 0), view("Needs Me", 1), view("Sessions", 2), view("Connections", 3),
+            view("Board", 0), view("Needs Me", 1), view("Sessions", 2), view("Connections", 3), view("Diary", 4),
             .separator(),
             entry("Reload", #selector(reload), key: "r"),
             .separator(),

@@ -43,6 +43,7 @@ function emptyBoard() {
     columns: DEFAULT_COLUMNS.map((c) => ({ ...c })),
     cards: [],
     sessionMeta: {},
+    dayNotes: {}, // the diary's own notes, by day (YYYY-MM-DD)
     settings: { ...DEFAULT_SETTINGS },
     createdAt: t,
     updatedAt: t,
@@ -54,6 +55,7 @@ function normalize(b) {
   if (!Array.isArray(b.columns) || !b.columns.length) b.columns = DEFAULT_COLUMNS.map((c) => ({ ...c }));
   if (!Array.isArray(b.cards)) b.cards = [];
   if (!b.sessionMeta || typeof b.sessionMeta !== 'object') b.sessionMeta = {};
+  if (!b.dayNotes || typeof b.dayNotes !== 'object' || Array.isArray(b.dayNotes)) b.dayNotes = {};
   b.settings = { ...DEFAULT_SETTINGS, ...(b.settings || {}) };
   if (typeof b.seq !== 'number') b.seq = b.cards.length;
   const colIds = new Set(b.columns.map((c) => c.id));
@@ -504,6 +506,21 @@ const OPS = {
     card.notes = card.notes.filter((n) => n.id !== a.noteId);
     touch(card);
     return { removed: true };
+  },
+
+  // The diary's note for one day; an empty text removes it.
+  'diary.note'(b, a) {
+    const day = str(a.day, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new UserError('Which day? Give it as YYYY-MM-DD.');
+    let text = str(a.text, 8000).trim();
+    const had = b.dayNotes[day] && b.dayNotes[day].text;
+    if (a.append) {
+      if (!text) throw new UserError('The note is empty.');
+      if (had) text = `${had}\n${text}`.slice(0, 8000);
+    }
+    if (text) b.dayNotes[day] = { text, at: now() };
+    else delete b.dayNotes[day];
+    return { day, text };
   },
 
   'columns.set'(b, a) {

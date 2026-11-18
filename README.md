@@ -2,7 +2,7 @@
 
 A local kanban board over your Claude sessions.
 
-A **card** is a task. Its **sub-tasks** are checklist items or **Claude sessions**, and a linked session's status (running, needs you, ready for review, done) is read live from Claude's own files, so nobody has to keep it up to date. Cards can be **connected** (blocks, parent of, related), and Claude sessions can read and update the board themselves.
+A **card** is a task. Its **sub-tasks** are checklist items or **Claude sessions**, and a linked session's status (running, needs you, ready for review, done) is read live from Claude's own files, so nobody has to keep it up to date. Cards can be **connected** (blocks, parent of, related), and Claude sessions can read and update the board themselves. A **Diary** keeps a short, searchable log of what you did each day, including in sessions you have archived or Claude has since deleted.
 
 ![The board: columns of cards, with unsorted sessions on the left](docs/screenshots/board.png)
 
@@ -10,6 +10,7 @@ It is for people who run many Claude Code sessions on related work and lose trac
 
 - Runs on your Mac only: a small web server on `127.0.0.1`, one JSON file for the board, no account, no dependencies.
 - Reads the Claude desktop app's and Claude Code's session files. It never changes them.
+- Keeps a diary of each day's work as short notes, not copies of your sessions: about 12 KB a day.
 - Comes with a Mac app (Dock icon, menu-bar count of sessions waiting on you), a `/board` skill and `board_*` tools for Claude, and a `taskboard` command.
 
 The screenshots here show made-up data from [`scripts/demo.js`](scripts/demo.js).
@@ -113,7 +114,21 @@ Further down the card:
 
 ![Connections: the cards as a graph](docs/screenshots/connections.png)
 
-### 7. Use it from Claude
+### 7. Look back at any day
+
+**Diary** shows one day at a time: every session you worked in, with what you asked, the recap of each turn (or how Claude's reply began when a turn has none), the steps finished, commits, pull requests and files edited. Pick a day in the calendar or step through days with `←` and `→`. The box at the top is your own note for the day.
+
+![Diary: one day of work, session by session](docs/screenshots/diary.png)
+
+Type in the search box to search every day at once. Every word has to come up in a session's day, a word also finds its plural, and a "quoted phrase" has to appear as written. The calendar marks the days with matches; click a day's heading to open it.
+
+![Searching the diary](docs/screenshots/diary-search.png)
+
+- **It outlives Claude's own files.** Claude deletes old transcripts, and you archive or delete sessions. The diary keeps the day, and marks a session "No longer in Claude" when it is gone.
+- **It is a log, not a copy.** Each entry is the first few hundred characters, and each session is capped at a few dozen entries a day. As a measure, about 200 days of heavy daily use came to 2.5 MB, read from 3.5 GB of transcripts. The size is shown under the calendar.
+- **It costs little to keep.** A transcript is read once, in the background (about 6 seconds for those 3.5 GB), then only what is appended to it. Each day is one small file that is not rewritten after the day is over.
+
+### 8. Use it from Claude
 
 Every Claude Code session (desktop app and terminal) gets the `board` skill and the `board_*` tools, so you can ask in plain words:
 
@@ -121,6 +136,7 @@ Every Claude Code session (desktop app and terminal) gets the `board` skill and 
 - "put this session under the search card"
 - "move TB-4 to review" · "TB-4 is blocked by the SDK upgrade card"
 - "add a note to the card with where we got to"
+- "what did I do yesterday" · "write my standup from the diary" · "when did I fix the export"
 
 `/board` opens the board beside the chat. The page fits the narrow pane:
 
@@ -138,8 +154,10 @@ Each card is also a file Claude can read: `~/.claude/taskboard/cards/TB-4.md`.
 | `board_connect_cards` | Connect two cards |
 | `board_add_note` | Leave context for the next session |
 | `board_find_sessions` | Find sessions by title, ticket, PR or state |
+| `board_diary` | What you did on a day or over a span of days, or a search across every day |
+| `board_diary_note` | Add a line to your own note for a day |
 
-### 8. Use it from the terminal
+### 9. Use it from the terminal
 
 ```text
 taskboard ls [--all]            taskboard show TB-3
@@ -148,12 +166,14 @@ taskboard move TB-3 "In review" taskboard sub TB-3 "<title>"
 taskboard note TB-3 "<text>"    taskboard link TB-3 [session-id]
 taskboard connect TB-3 TB-7 blocks
 taskboard sessions [query] [--unsorted]
+taskboard diary [today|yesterday|YYYY-MM-DD] [--days 7] [--project name]
+taskboard diary --search "<words>"
 taskboard start | stop | restart | status | doctor
 ```
 
 ### Shortcuts and theme
 
-`/` search · `n` new card · `1`–`4` switch view · `Esc` close. The ◐ button switches between dark and light.
+`/` search · `n` new card · `1`–`5` switch view · `←` `→` previous and next day in the Diary · `Esc` close. The ◐ button switches between dark and light.
 
 ![The board in the light theme](docs/screenshots/board-light.png)
 
@@ -165,12 +185,14 @@ Reads, never changes:
 - `~/Library/Application Support/Claude/claude_desktop_config.json` — sidebar groups only
 - `~/.claude/projects/*/*.jsonl` — transcripts, for each session's step list and last recap
 - `~/.claude/sessions/` — which sessions are running
+- `~/.claude/history.jsonl` — once, for prompts typed in a terminal in sessions whose transcript Claude had already deleted
 
 Writes:
 
 - `~/.claude/taskboard/board.json` — the board (hourly copies in `backups/`)
 - `~/.claude/taskboard/cards/*.md` and `BOARD.md` — generated copies for Claude to read
-- `~/.claude/taskboard/cache/` — what it has already read from transcripts
+- `~/.claude/taskboard/diary/` — the diary: one file per day in `days/`, and each session's title, project and card in `sessions.json`. Plain JSON; delete a day's file to forget that day
+- `~/.claude/taskboard/cache/` — what it has already read from transcripts, and how far
 - `~/.claude/skills/board/SKILL.md` — the skill
 - `~/.claude.json` — one entry, the `taskboard` MCP server (added with `claude mcp add --scope user`)
 - `~/.local/bin/taskboard` — the command
@@ -189,17 +211,17 @@ taskboard app                # rebuild only the Mac app
 ```
 
 ```bash
-taskboard uninstall          # removes the app, skill, MCP entry and command; keeps board.json
+taskboard uninstall          # removes the app, skill, MCP entry and command; keeps the board and the diary
 ```
 
 ```bash
-taskboard uninstall --purge  # also deletes the board
+taskboard uninstall --purge  # also deletes the board and the diary
 ```
 
 ## Development
 
 ```bash
-npm test                     # 15 tests, against fake Claude folders in a temp directory
+npm test                     # 23 tests, against fake Claude folders in a temp directory
 ```
 
 ```bash
@@ -210,12 +232,14 @@ npm run demo                 # the board on made-up data, on port 4781
 npm run screenshots          # retake docs/screenshots from the demo (needs Node 22+ and Chrome)
 ```
 
-No dependencies and no build step. `src/store.js` is the board and its operations; `src/claude.js` reads Claude's files; `src/view.js` joins the two (statuses, detected connections, linking rules, first-run import); `src/server.js`, `src/mcp.js` and `src/cli.js` are the three ways in; `public/` is the page; `macapp/` is the Mac app, a thin window around that page.
+No dependencies and no build step. `src/store.js` is the board and its operations; `src/claude.js` reads Claude's files; `src/view.js` joins the two (statuses, detected connections, linking rules, first-run import); `src/diary.js` keeps the diary; `src/server.js`, `src/mcp.js` and `src/cli.js` are the three ways in; `public/` is the page; `macapp/` is the Mac app, a thin window around that page.
 
 ## Limits
 
 - The session files and transcript format are Claude internals, not a documented interface, so a Claude update can change them. `taskboard doctor` shows what is found.
 - A session's status summary comes from the desktop app, so sessions run only in a terminal show as idle unless they are running.
+- The diary starts from the transcripts still on disk the first time it runs. For older days it has only what the session records and the terminal's prompt history hold: titles, last reports and prompts.
+- The diary holds the beginning of each prompt and reply in plain text, as Claude's own transcripts do. It stays on your Mac, in the folder above.
 - macOS only for now: the desktop app's folder and the Mac app are Mac-specific.
 
 ## License
