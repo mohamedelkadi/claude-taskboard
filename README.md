@@ -68,7 +68,9 @@ The left rail lists open sessions that are not on a card yet.
 - A dashed hint under a session (`→ TB-7 · mentions SHOP-198`) is a suggestion; click it to accept.
 - Press `n` or use **New card** for a card with no session yet.
 
-Drag cards between columns to change their status. A card in a column before **In progress** moves there on its own when one of its sessions starts working (you can switch that off in Settings); nothing else moves a card but you. The chips on a card show how many of its sessions are running, need you, or are ready for review, and which pull requests they opened.
+The search box (`/`) looks at everything: while you type, the project dropdown and the Sessions filters step aside, and a search finds sessions that are already on a card, or archived, as well as unsorted ones. With nothing typed, the project dropdown counts a session for the repos it ran commands in, not only the folder it started in.
+
+Drag cards between columns to change their status. A dropped card shows in its new column at once; if the board takes more than a moment to save it, the card dims and shows a small spinner, and if the save fails it goes back where it was with a message. A card in a column before **In progress** moves there on its own when one of its sessions starts working (you can switch that off in Settings); nothing else moves a card but you. The chips on a card show how many of its sessions are running, need you, or are ready for review, and which pull requests they opened.
 
 ### 3. Open a card
 
@@ -224,7 +226,7 @@ taskboard uninstall --purge  # also deletes the board and the diary
 ## Development
 
 ```bash
-npm test                     # 27 tests, against fake Claude folders in a temp directory
+npm test                     # 30 tests, against fake Claude folders in a temp directory
 ```
 
 ```bash
@@ -241,7 +243,7 @@ No dependencies and no build step. `src/store.js` is the board and its operation
 
 - The session files and transcript format are Claude internals, not a documented interface, so a Claude update can change them. `taskboard doctor` shows what is found.
 - A session's status summary comes from the desktop app, so sessions run only in a terminal show as idle unless they are running.
-- The page follows Claude within a second or two: it is told of every change, and checks every few seconds while a session is working. If its connection drops (the Mac slept, the window sat hidden) it reconnects and catches up by itself.
+- The board is told of changes rather than asking for them. It watches its own file and Claude's session folders, transcripts and prompt history, and tells the page the moment something changes: a card moved from a terminal or by a Claude session shows in about a tenth of a second, a session's progress within a second or two. A check every 15 seconds catches anything the watchers miss, such as a session process that died without writing anything. If the page's connection drops (the Mac slept, the window sat hidden) it reconnects and catches up by itself.
 - The diary starts from the transcripts still on disk the first time it runs. For older days it has only what the session records and the terminal's prompt history hold: titles, last reports and prompts.
 - The diary holds the beginning of each prompt and reply in plain text, as Claude's own transcripts do. It stays on your Mac, in the folder above.
 - macOS only for now: the desktop app's folder and the Mac app are Mac-specific.
