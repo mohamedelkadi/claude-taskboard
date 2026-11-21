@@ -41,16 +41,13 @@ document.addEventListener('focusout', (e) => {
 });
 
 document.addEventListener('pointerdown', () => (S.pointerDown = true), true);
-const pointerReleased = () =>
-  setTimeout(() => {
-    S.pointerDown = false;
-    if (S.renderPending) {
-      S.renderPending = false;
-      render();
-    }
-  }, 0);
+const pointerReleased = () => setTimeout(releasePointer, 0);
 document.addEventListener('pointerup', pointerReleased, true);
 document.addEventListener('pointercancel', pointerReleased, true);
+// A pointer marked down holds every repaint back, so a release that never gets reported
+// must not outlast the next move: a pointer that moves with no button held is not down.
+document.addEventListener('pointermove', (e) => S.pointerDown && e.buttons === 0 && releasePointer(), true);
+window.addEventListener('blur', releasePointer);
 
 document.addEventListener('keydown', (e) => {
   const t = e.target;

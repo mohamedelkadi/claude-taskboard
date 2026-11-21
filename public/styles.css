@@ -139,6 +139,18 @@ select.field { padding-right: 4px; }
 .card.dragging { opacity: .35; }
 .card.drop-target { outline: 2px solid var(--accent); outline-offset: 1px; }
 .card.open { border-color: var(--accent); }
+/* Dropped in a column, not yet confirmed by the board. A save that finishes at once never shows
+   this: the dimming and the spinner start only after a quarter of a second. */
+.card.saving { position: relative; cursor: progress; animation: saving-dim .2s ease .25s forwards; }
+.card.saving::after {
+  content: ''; position: absolute; top: 9px; right: 9px; width: 12px; height: 12px; border-radius: 50%; box-sizing: border-box;
+  border: 2px solid var(--line2); border-top-color: var(--accent); opacity: 0;
+  animation: saving-in .2s ease .25s forwards, saving-spin .7s linear infinite;
+}
+@keyframes saving-dim { to { opacity: .6; } }
+@keyframes saving-in { to { opacity: 1; } }
+@keyframes saving-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .card.saving::after { animation: saving-in .2s ease .25s forwards; } }
 .card-top { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); }
 .key { font-weight: 650; font-variant-numeric: tabular-nums; }
 .card h3 { font-size: 13.5px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }

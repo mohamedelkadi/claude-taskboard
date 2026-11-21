@@ -188,3 +188,38 @@ test('the MCP server lists its tools and changes the board', async () => {
     mcp.kill();
   }
 });
+
+/** Ask for the state until `ready` likes it; resolves with how long that took, in milliseconds. */
+async function until(ready, limit) {
+  const started = Date.now();
+  for (;;) {
+    const state = (await request('GET', '/api/state')).json;
+    if (ready(state)) return Date.now() - started;
+    if (Date.now() - started > limit) assert.fail(`the board did not show it within ${limit} ms`);
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
+/** Let a look at Claude's files that an earlier test scheduled run first, so it cannot stand in for the one being tested. */
+const quiet = () => new Promise((r) => setTimeout(r, 2000));
+
+test('a change to the board file by another process shows at once, not on the next look', async () => {
+  await quiet();
+  // what `taskboard` in a terminal, or a Claude session through MCP, does: write the file
+  const state = (await request('GET', '/api/state')).json;
+  const card = state.cards.find((c) => c.title === 'From the API');
+  assert.notEqual(card.status, 'done');
+  store.apply('card.move', { card: card.id, status: 'done' });
+  const took = await until((s) => s.cards.find((c) => c.id === card.id).status === 'done', 3000);
+  assert.ok(took < 500, `the page's state followed in ${took} ms; it used to wait for a rescan of Claude's files`);
+});
+
+test('a session writing its transcript moves its step list without anything else asking', async () => {
+  const stepsDone = (s) => (s.sessions.find((x) => x.id === fx.ids.root).steps || {}).done;
+  await quiet();
+  await until((s) => typeof stepsDone(s) === 'number', 3000); // the crawl at start-up has read it
+  const before = stepsDone((await request('GET', '/api/state')).json);
+  require('fs').appendFileSync(fx.transcript, fx.tool('t3', 'mcp__ccd_turn__update_plan', { advance: true }) + '\n');
+  const took = await until((s) => stepsDone(s) === before + 1, 4000);
+  assert.ok(took < 3000, `the step list followed in ${took} ms`);
+});

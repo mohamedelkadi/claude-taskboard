@@ -35,6 +35,7 @@ const S = {
     wide: new Set(), // long entries shown in full
   },
   drag: null,
+  pending: new Map(), // card id -> { status, beforeId }: a move the board has not confirmed yet
   swapping: false,
   pointerDown: false,
   renderPending: false,
@@ -248,17 +249,28 @@ async function post(path, body) {
   return res.json();
 }
 
-/** Run one board operation; the server answers with the fresh state. */
-async function op(name, args) {
+/**
+ * Run one board operation; the server answers with the fresh state. `settle` runs the
+ * moment the answer is in, however it went, before anything is painted from it: a page
+ * that showed the change early drops its "saving" marks there, and puts things back
+ * as the board has them when the change did not go through.
+ */
+async function op(name, args, settle) {
   try {
     const j = await post('/api/op', { name, args });
+    if (settle) settle();
     if (!j.ok) {
       toast(j.error || 'That did not work.', 'error');
+      if (settle) renderWhenSafe();
       return null;
     }
     setData(j.state);
     return j.result == null ? true : j.result;
   } catch (_) {
+    if (settle) {
+      settle();
+      renderWhenSafe();
+    }
     toast('The board server is not responding. Run "taskboard start".', 'error');
     return null;
   }
@@ -290,6 +302,19 @@ function renderWhenSafe() {
   if (S.drag) S.drag.stale = true;
   else if (S.pointerDown) S.renderPending = true;
   else render();
+}
+
+/**
+ * The pointer is up, or a drag has taken it over: paint what was held back. Engines
+ * disagree about which events say so (WebKit sends no pointercancel when a drag starts,
+ * WebKit bug 222632), so this is called from every place that can know.
+ */
+function releasePointer() {
+  S.pointerDown = false;
+  if (S.renderPending && !S.drag) {
+    S.renderPending = false;
+    render();
+  }
 }
 
 async function openSession(id) {

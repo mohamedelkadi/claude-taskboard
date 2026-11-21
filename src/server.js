@@ -146,11 +146,16 @@ async function crawl() {
   }
 }
 
+// A burst of file events is one look at Claude's files: the first starts it a moment later
+// (a look costs a few dozen milliseconds), and none follows another closer than SCAN_GAP, so a
+// session that writes all the time costs one a second rather than one per write.
+const SCAN_LEAD = 100;
+const SCAN_GAP = 1000;
 let timer = null;
 let lastScan = 0;
 function scheduleScan() {
   if (timer) return;
-  const wait = Math.max(700, 1500 - (Date.now() - lastScan));
+  const wait = Math.max(SCAN_LEAD, SCAN_GAP - (Date.now() - lastScan));
   timer = setTimeout(() => {
     timer = null;
     lastScan = Date.now();
@@ -158,10 +163,29 @@ function scheduleScan() {
   }, wait);
 }
 
-function watch(target, opts, filter) {
+// The board file changed: by this server, by `taskboard` in a terminal, or by a Claude session
+// through MCP. What the page shows depends only on that file and on the last look at Claude's
+// files, so show it now, without waiting for a look; then take that look anyway, for what a
+// changed board sets off (sessions joining cards, cards moving on).
+let boardTimer = null;
+function boardChanged() {
+  if (!boardTimer) {
+    boardTimer = setTimeout(() => {
+      boardTimer = null;
+      try {
+        if (state) rebuild();
+      } catch (e) {
+        log('rebuild failed:', e.message);
+      }
+    }, 20);
+  }
+  scheduleScan();
+}
+
+function watch(target, opts, filter, onChange) {
   try {
     fs.watch(target, opts, (_ev, file) => {
-      if (!filter || filter(file)) scheduleScan();
+      if (!filter || filter(file)) (onChange || scheduleScan)();
     }).on('error', () => {});
   } catch (_) {}
 }
@@ -313,17 +337,14 @@ function main() {
     watch(P.DESKTOP_SESSIONS_DIR, { recursive: true });
     watch(P.LIVE_DIR, {});
     watch(P.DESKTOP_DIR, {}, (f) => f === path.basename(P.DESKTOP_CONFIG));
-    watch(P.DATA_DIR, {}, (f) => f === path.basename(P.BOARD_FILE));
-    // Safety net for anything the watchers miss. Transcripts are not watched, so while a
-    // session is working this is also what moves its step list along: look more often then.
-    let quiet = 0;
-    setInterval(() => {
-      const working = scanResult.sessions.some((s) => s.state === 'running');
-      if (working || ++quiet >= 4) {
-        quiet = 0;
-        scheduleScan();
-      }
-    }, 5000).unref();
+    watch(P.DATA_DIR, {}, (f) => f === path.basename(P.BOARD_FILE), boardChanged);
+    // what moves a session's step list along, and the diary's days, as it works
+    watch(P.PROJECTS_DIR, { recursive: true }, (f) => !f || f.endsWith('.jsonl'));
+    watch(P.CLAUDE_DIR, {}, (f) => f === path.basename(P.HISTORY_FILE));
+    // Safety net for what a watcher can miss: events dropped while the Mac slept, or a
+    // session whose process died without a trace in any file. The watchers keep the board
+    // current; this only makes sure a lost event is not a lost update.
+    setInterval(scheduleScan, 15000).unref();
     // A heartbeat the page can hear: when it stops, the page knows its connection died
     // (the Mac slept, the window sat hidden for hours) and fetches the board again.
     setInterval(() => {

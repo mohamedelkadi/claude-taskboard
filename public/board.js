@@ -16,8 +16,9 @@ function cardFace(card) {
   if (c.needs) sig.push(`<span class="sig needs">${c.needs} need${c.needs === 1 ? 's' : ''} you</span>`);
   if (c.review) sig.push(`<span class="sig review">${c.review} to review</span>`);
   const prs = v.prs.slice().sort((a, b) => (a.state === 'OPEN' ? -1 : 1) - (b.state === 'OPEN' ? -1 : 1)).slice(0, 3);
+  const saving = S.pending.has(card.id); // dropped here, not yet confirmed by the board
   return `
-    <article class="card prio-${esc(card.priority)}${S.cardId === card.id ? ' open' : ''}" draggable="true" data-card="${esc(card.id)}" data-act="open-card">
+    <article class="card prio-${esc(card.priority)}${S.cardId === card.id ? ' open' : ''}${saving ? ' saving' : ''}" draggable="${saving ? 'false' : 'true'}"${saving ? ' aria-busy="true" title="Saving…"' : ''} data-card="${esc(card.id)}" data-act="open-card">
       <div class="card-top">
         <span class="key">${esc(card.key)}</span>${ticketChip(card.ticket)}${projChip(card.project)}
         ${card.priority === 'high' || card.priority === 'urgent' ? `<span class="chip tag">${PRIO_LABEL[card.priority]}</span>` : ''}
@@ -68,6 +69,24 @@ function cardSessionRow(s) {
     </div>`;
 }
 
+/**
+ * The cards a column shows, in order. A card that was just dropped here sits where it was
+ * dropped, marked as saving, before the board has confirmed it; the board's own answer
+ * replaces this the moment it arrives.
+ */
+function columnCards(col) {
+  const shown = S.data.cards.filter((c) => !c.archived && cardMatches(c));
+  const homeOf = (c) => (S.pending.has(c.id) ? S.pending.get(c.id).status : c.status);
+  const here = shown.filter((c) => homeOf(c) === col.id);
+  const cards = here.filter((c) => !S.pending.has(c.id)).sort((a, b) => a.order - b.order);
+  for (const c of here) {
+    if (!S.pending.has(c.id)) continue;
+    const at = cards.findIndex((o) => o.id === S.pending.get(c.id).beforeId);
+    cards.splice(at >= 0 ? at : cards.length, 0, c);
+  }
+  return cards;
+}
+
 function renderBoard() {
   const x = ix();
   const d = S.data;
@@ -87,7 +106,7 @@ function renderBoard() {
 
   const cols = d.columns
     .map((col) => {
-      const cards = d.cards.filter((c) => c.status === col.id && !c.archived && cardMatches(c)).sort((a, b) => a.order - b.order);
+      const cards = columnCards(col);
       const composer =
         S.composer === col.id
           ? `<div class="composer">
@@ -191,6 +210,31 @@ function clearDropMarks() {
   for (const el of $$('.drop-col')) el.classList.remove('drop-col');
 }
 
+/** Drop a card into a column. It shows there at once, marked as saving, until the board confirms. */
+function moveCard(id, status, beforeId) {
+  S.pending.set(id, { status, beforeId: beforeId || null });
+  return op('card.move', { card: id, status, beforeId: beforeId || undefined }, () => S.pending.delete(id));
+}
+
+/**
+ * The drag is over, however the engine says so (dragend, or the timer a drop starts in case
+ * it never comes). A native drag takes the pointer over: no pointerup follows it, and some
+ * engines send no pointercancel either, so the pointer is released here, and what the drop
+ * changed, or what arrived while the drag held repaints back, is painted now.
+ */
+function endDrag() {
+  const drag = S.drag;
+  if (!drag) return;
+  S.drag = null;
+  S.pointerDown = false;
+  clearDropMarks();
+  for (const el of $$('.dragging')) el.classList.remove('dragging');
+  if (drag.stale || S.pending.size || S.renderPending) {
+    S.renderPending = false;
+    render();
+  }
+}
+
 function initBoardDnD() {
   const main = $('#main');
 
@@ -199,6 +243,7 @@ function initBoardDnD() {
     const sess = e.target.closest && e.target.closest('.sess[data-session]');
     if (!card && !sess) return;
     const el = card || sess;
+    S.pointerDown = false; // the drag has the pointer now
     S.drag = card ? { type: 'card', id: card.dataset.card } : { type: 'session', id: sess.dataset.session };
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', el.textContent.trim().slice(0, 80));
@@ -242,20 +287,16 @@ function initBoardDnD() {
     e.preventDefault();
     const body = e.target.closest('.col-body');
     if (drag.type === 'card') {
-      if (drag.col) op('card.move', { card: drag.id, status: drag.col, beforeId: drag.beforeId || undefined });
+      if (drag.col) moveCard(drag.id, drag.col, drag.beforeId);
     } else {
       const card = e.target.closest('.card[data-card]');
       if (card) linkSessionsTo(card.dataset.card, [drag.id]);
       else if (body) cardFromSessions([drag.id], body.dataset.col);
     }
     clearDropMarks();
+    // dragend follows within a few milliseconds; if an engine never sends it, finish here
+    setTimeout(endDrag, 150);
   });
 
-  main.addEventListener('dragend', () => {
-    const stale = S.drag && S.drag.stale;
-    S.drag = null;
-    clearDropMarks();
-    for (const el of $$('.dragging')) el.classList.remove('dragging');
-    if (stale) render();
-  });
+  main.addEventListener('dragend', endDrag);
 }
