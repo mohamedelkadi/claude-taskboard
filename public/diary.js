@@ -6,7 +6,9 @@
 const DIARY_KIND = { p: 'You', a: 'Claude', r: 'Recap', s: 'Done', c: 'Commit', pr: 'PR', f: 'Files' };
 const DIARY_FOLD = 8; // rows of a session shown before "Show all"
 
-const diaryWant = () => `${S.diary.day}|${S.q.trim()}|${S.project}`;
+// a typed search looks in every project, as it does on the board
+const diaryProject = () => (S.q.trim() ? '' : S.project);
+const diaryWant = () => `${S.diary.day}|${S.q.trim()}|${diaryProject()}`;
 
 /** Fetch what the view needs. Typing in the search box waits a moment first. */
 function loadDiary(now) {
@@ -20,7 +22,7 @@ function loadDiary(now) {
     const id = ++D.req;
     let j = null;
     try {
-      const res = await fetch('/api/diary?' + new URLSearchParams({ day: D.day, q: S.q.trim(), project: S.project }));
+      const res = await fetch('/api/diary?' + new URLSearchParams({ day: D.day, q: S.q.trim(), project: diaryProject() }));
       j = await res.json();
     } catch (_) {}
     if (id !== D.req) return; // a newer request is on its way

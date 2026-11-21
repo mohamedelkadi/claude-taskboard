@@ -32,6 +32,25 @@ test('scan reads sessions, groups, tickets and the transcript step list', async 
   assert.equal(detail.cost, 1.24);
 });
 
+test('a session started in a folder of several repos also counts for the repos it worked in', () => {
+  // started in ~/work, which holds the repos; ran commands in two of them and in a scratch folder
+  const id = `local_${fx.uuid(900)}`;
+  const file = path.join(fx.sessDir, `${id}.json`);
+  fx.desktopSession(id, 90, {
+    cwd: '/work', originCwd: '/work',
+    shellFolders: ['/work/api', '/work/app/.claude/worktrees/fix', '/work/api', '/work', '/private/tmp/claude-501/x/scratchpad', '/tmp/y', 42],
+  });
+  try {
+    const s = claude.scan().sessions.find((x) => x.id === id);
+    assert.equal(s.projectName, 'work');
+    assert.deepEqual(s.alsoIn, ['api', 'app'], 'repos once each, worktrees folded into their repo, no scratch folders, not itself');
+    // a session with no shellFolders has none
+    assert.deepEqual(claude.scan().sessions.find((x) => x.id === fx.ids.root).alsoIn, []);
+  } finally {
+    fs.rmSync(file);
+  }
+});
+
 test('a transcript is read incrementally as it grows', async () => {
   const root = claude.scan().sessions.find((s) => s.id === fx.ids.root);
   fs.appendFileSync(fx.transcript, fx.tool('t3', 'mcp__ccd_turn__wrap_up', { recap: 'Fixed the ranking.', ask: 'Ship it?' }) + '\n');

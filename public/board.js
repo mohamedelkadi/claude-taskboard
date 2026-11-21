@@ -53,16 +53,34 @@ function sessionRow(s) {
     </div>`;
 }
 
+/** A session that is already on a card, shown when a search finds it. Not draggable: it has a place. */
+function cardSessionRow(s) {
+  const x = ix();
+  const card = x.cards.get(s.cardId);
+  return `
+    <div class="sess found" data-session="${esc(s.id)}">
+      ${stateDot(s.estate)}
+      <div class="sess-body">
+        <div class="sess-title" data-act="session-info" data-session="${esc(s.id)}" title="${esc(s.title)}">${esc(s.title)}</div>
+        <div class="sess-meta">${card ? `<a class="chip" href="#card=${esc(card.key)}" data-act="open-card" data-card="${esc(card.id)}">${esc(card.key)} ${esc(card.title.slice(0, 26))}</a>` : ''}${projChip(s.projectName)}<span>${esc(ago(s.lastActivityAt))}</span>${s.archived ? '<span>archived</span>' : ''}</div>
+      </div>
+      ${openButton(s, 'ghost narrow')}
+    </div>`;
+}
+
 function renderBoard() {
   const x = ix();
   const d = S.data;
   const unsorted = x.unsorted.filter(sessionMatches);
+  // a search also finds sessions that are already on a card, which the unsorted list leaves out
+  const onCards = searching() ? x.visible.filter((s) => s.cardId && sessionMatches(s)).sort(byRecent) : [];
   const inbox = S.inbox
     ? `<aside class="inbox">
         <div class="inbox-head">Unsorted sessions <span class="pill">${unsorted.length}</span><span class="grow"></span><button class="icon-btn" data-act="toggle-inbox" title="Hide">⟨</button></div>
         <div class="inbox-hint">Drag one onto a card to file it there, or into a column to make a card from it.</div>
         <div class="inbox-list" data-scroll="inbox">
-          ${unsorted.length ? unsorted.map(sessionRow).join('') : `<div class="inbox-empty">${x.unsorted.length ? 'Nothing matches the filter.' : 'Every open session is on a card.'}</div>`}
+          ${unsorted.length ? unsorted.map(sessionRow).join('') : onCards.length ? '' : `<div class="inbox-empty">${searching() ? 'No session matches.' : x.unsorted.length ? 'Nothing matches the filter.' : 'Every open session is on a card.'}</div>`}
+          ${onCards.length ? `<div class="inbox-sub">On a card <span class="pill">${onCards.length}</span></div>${onCards.slice(0, 30).map(cardSessionRow).join('')}${onCards.length > 30 ? `<div class="inbox-empty">${onCards.length - 30} more under Sessions.</div>` : ''}` : ''}
         </div>
       </aside>`
     : `<button class="inbox-toggle" data-act="toggle-inbox" title="Show unsorted sessions">Unsorted · ${x.unsorted.length}</button>`;

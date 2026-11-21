@@ -198,16 +198,38 @@ function matches(text) {
   return !q || text.toLowerCase().includes(q);
 }
 
+/**
+ * A typed search looks at everything. The project dropdown and the Sessions filters
+ * (unsorted, state, archived) narrow what is listed when nothing is typed; once something
+ * is, they step aside, so a title always finds its session whatever was left switched on.
+ */
+const searching = () => !!S.q.trim();
+
+/** Did the session run in this project: the folder it started in, or a repo it also worked in? */
+const inProject = (s, name) => s.projectName === name || (s.alsoIn || []).includes(name);
+
 function cardMatches(card) {
-  if (S.project && card.project !== S.project && !card.view.subs.some((sub) => (ix().sessions.get(sub.sessionId) || {}).projectName === S.project)) return false;
-  if (!S.q.trim()) return true;
-  return matches([card.key, card.title, card.ticket, card.project, card.tags.join(' '), card.view.subs.map((s) => s.title).join(' '), card.view.tickets.join(' ')].join(' '));
+  if (searching()) {
+    return matches([card.key, card.title, card.ticket, card.project, card.tags.join(' '), card.view.subs.map((s) => s.title).join(' '), card.view.tickets.join(' ')].join(' '));
+  }
+  if (!S.project) return true;
+  return card.project === S.project || card.view.subs.some((sub) => {
+    const s = ix().sessions.get(sub.sessionId);
+    return s && inProject(s, S.project);
+  });
 }
 
 function sessionMatches(s) {
-  if (S.project && s.projectName !== S.project) return false;
-  if (!S.q.trim()) return true;
-  return matches([s.title, s.projectName, s.branch, s.tickets.join(' '), s.prs.map((p) => '#' + p.number).join(' '), (s.summary && s.summary.needsAction) || ''].join(' '));
+  if (!searching()) return !S.project || inProject(s, S.project);
+  const card = s.cardId && ix().cards.get(s.cardId);
+  return matches(
+    [s.title, s.projectName, (s.alsoIn || []).join(' '), s.branch, s.tickets.join(' '), s.prs.map((p) => '#' + p.number).join(' '), (s.summary && s.summary.needsAction) || '', card ? `${card.key} ${card.title}` : ''].join(' ')
+  );
+}
+
+/** What is narrowing a list right now, in words, for the empty states. */
+function activeFilters(parts) {
+  return [...parts, S.project && `project ${S.project}`].filter(Boolean).join(', ');
 }
 
 // ---------- talking to the server ----------
@@ -371,6 +393,11 @@ function renderTop() {
 
 function renderMain() {
   const main = $('#main');
+  const dropdown = $('#project');
+  if (dropdown) {
+    dropdown.classList.toggle('paused', searching());
+    dropdown.title = searching() ? 'A search looks in every project' : 'Project';
+  }
   if (S.view === 'needs') return swap(main, renderNeeds());
   if (S.view === 'sessions') return swap(main, renderSessions());
   if (S.view === 'graph') return renderGraph(main);
