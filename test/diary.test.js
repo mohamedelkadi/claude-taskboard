@@ -157,6 +157,7 @@ test('the diary keeps a day after Claude deletes the session and its transcript'
   assert.ok(s, 'the day is still there');
   assert.equal(s.exists, false);
   assert.equal(s.title, 'Archived thing', 'under the title the session had');
+  assert.equal(diary.titleOf(fx.ids.old), 'Archived thing', 'which a card that still lists the session can show');
   assert.equal(s.entries.length, 6);
   assert.equal(diary.page({ q: 'line items' }, st).results.total, 1, 'and still found by search');
   assert.ok(!fs.existsSync(path.join(P.CACHE_DIR, 'diary', `${OLD}.json`)), 'its reading position is dropped with the transcript');

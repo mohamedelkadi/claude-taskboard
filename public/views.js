@@ -23,7 +23,7 @@ function needItem(s, kind) {
         </div>
       </div>
       <div class="row-actions">
-        <button class="btn small primary" data-act="open-session" data-session="${esc(s.id)}">Open in Claude</button>
+        ${openButton(s, 'primary')}
         ${kind === 'needs' ? `<button class="btn small" data-act="ack" data-session="${esc(s.id)}" title="You dealt with it outside the session">Mark handled</button>` : ''}
       </div>
     </div>`;
@@ -47,11 +47,25 @@ function renderNeeds() {
 
 function sessionsList() {
   const x = ix();
+  // a typed search looks at every session, on a card or not, archived or not
+  if (searching()) return x.visible.filter(sessionMatches).sort(byRecent);
   let list = S.showArchived ? S.data.sessions : x.visible.filter((s) => !s.archived);
   if (S.sessScope === 'unsorted') list = list.filter((s) => !s.cardId && (S.showArchived || !s.hidden));
   else if (S.sessScope === 'linked') list = list.filter((s) => s.cardId);
   if (S.sessState) list = list.filter((s) => s.estate === S.sessState);
   return list.filter(sessionMatches).sort(byRecent);
+}
+
+/** Why the list is empty, naming whatever filter is narrowing it. */
+function sessionsEmpty() {
+  if (searching()) return `No session matches “${esc(S.q.trim())}”.`;
+  if (S.sessScope === 'unsorted' && !S.sessState && !S.project) return 'Every open session is on a card.';
+  const on = activeFilters([
+    S.sessScope === 'unsorted' && 'unsorted only',
+    S.sessScope === 'linked' && 'on a card only',
+    S.sessState && (STATE_LABEL[S.sessState] || S.sessState).toLowerCase(),
+  ]);
+  return `No sessions match.${on ? ` Filters on: ${esc(on)}.` : ''}`;
 }
 
 function renderSessions() {
@@ -79,21 +93,21 @@ function renderSessions() {
         <td>${card ? `<a class="chip" href="#card=${esc(card.key)}" data-act="open-card" data-card="${esc(card.id)}">${esc(card.key)} ${esc(card.title.slice(0, 26))}</a>` : sug ? `<button class="suggest" data-act="accept-suggest" data-session="${esc(s.id)}" data-card="${esc(sug.id)}">→ ${esc(sug.key)} · ${esc(s.suggest.reason)}</button>` : '<span class="muted">—</span>'}</td>
         <td>${s.prs.slice(0, 3).map(prChip).join(' ')}</td>
         <td class="nowrap muted" title="${esc(fullDate(s.lastActivityAt))}">${esc(ago(s.lastActivityAt))}</td>
-        <td><button class="icon-btn" data-act="open-session" data-session="${esc(s.id)}" title="Open in Claude">↗</button></td>
+        <td class="nowrap">${openButton(s)}</td>
       </tr>`;
     })
     .join('');
   const n = S.sel.size;
   return `<div class="page" data-scroll="sessions"><div class="page-inner">
-    <div class="filters">
+    <div class="filters${searching() ? ' paused' : ''}"${searching() ? ' title="A search looks at every session, so these filters are off while you type"' : ''}>
       ${seg('sessScope', S.sessScope, [['unsorted', `Unsorted ${x.unsorted.length}`], ['linked', 'On a card'], ['all', 'All']])}
       ${seg('sessState', S.sessState, [['', 'Any state'], ['running', 'Running'], ['needs_you', 'Needs you'], ['review', 'To review'], ['done', 'Done'], ['idle', 'Idle']])}
       <label class="check"><input type="checkbox" data-change="sess-archived"${S.showArchived ? ' checked' : ''}> Include archived and hidden</label>
-      <span class="grow"></span><span class="muted">${list.length} session${list.length === 1 ? '' : 's'}${list.length > shown.length ? `, first ${shown.length} shown` : ''}</span>
+      <span class="grow"></span><span class="muted">${list.length} session${list.length === 1 ? '' : 's'}${list.length > shown.length ? `, first ${shown.length} shown` : ''}${searching() ? ' · filters off while searching' : ''}</span>
     </div>
     ${shown.length
       ? `<table class="sessions"><thead><tr><th><input type="checkbox" data-change="sess-pick-all"${n && shown.every((s) => S.sel.has(s.id)) ? ' checked' : ''} aria-label="Select all"></th><th>State</th><th>Session</th><th>Project</th><th>Card</th><th>PRs</th><th>Active</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
-      : `<div class="empty-state">${S.sessScope === 'unsorted' && !S.q && !S.sessState ? 'Every open session is on a card.' : 'No sessions match.'}</div>`}
+      : `<div class="empty-state">${sessionsEmpty()}</div>`}
     ${n ? `<div class="bulk"><strong>${n} selected</strong><button class="btn primary" data-act="bulk-link">Link to a card…</button><button class="btn" data-act="bulk-new">New card from ${n === 1 ? 'it' : 'them'}</button><button class="btn" data-act="bulk-unlink">Take off cards</button><button class="btn" data-act="bulk-hide">Hide</button><span class="grow"></span><button class="btn ghost" data-act="bulk-clear">Clear</button></div>` : ''}
   </div></div>`;
 }

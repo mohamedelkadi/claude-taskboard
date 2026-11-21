@@ -170,7 +170,7 @@ function sessionModalHtml(s) {
       <span class="grow"></span>
       ${s.estate === 'needs_you' ? `<button class="btn" data-act="ack" data-session="${esc(s.id)}">Mark handled</button>` : ''}
       <button class="btn" data-act="modal-link" data-session="${esc(s.id)}">${card ? 'Move to another card…' : 'Link to a card…'}</button>
-      <button class="btn primary" data-act="open-session" data-session="${esc(s.id)}">Open in Claude</button>
+      ${openButton(s, 'primary')}
     </div></div>`;
 }
 
@@ -232,6 +232,7 @@ function settingsHtml() {
         <div class="help">Ticket keys on cards and sessions open this address, with {key} replaced.</div>
       </div>
       <div class="form-row"><span>Automation</span>
+        <label class="check"><input type="checkbox" data-change="set-follow"${st.followSessions ? ' checked' : ''}> A card that has not started moves to In progress when one of its sessions starts working</label>
         <label class="check"><input type="checkbox" data-change="set-inherit"${st.inheritChildren ? ' checked' : ''}> A session started from a session on a card joins that card</label>
         <label class="check"><input type="checkbox" data-change="set-autostart"${st.autostart ? ' checked' : ''}> Start the board whenever a Claude session starts</label>
       </div>
@@ -246,7 +247,7 @@ function settingsHtml() {
 
 ACTIONS.settings = () => {
   const d = S.data;
-  showModal('settings', '', { cols: d.columns.map((c) => ({ ...c })), ticketUrl: d.settings.ticketUrl || '', inheritChildren: d.settings.inheritChildren !== false, autostart: d.settings.autostart !== false });
+  showModal('settings', '', { cols: d.columns.map((c) => ({ ...c })), ticketUrl: d.settings.ticketUrl || '', inheritChildren: d.settings.inheritChildren !== false, autostart: d.settings.autostart !== false, followSessions: d.settings.followSessions !== false });
   $('#modal').innerHTML = settingsHtml();
 };
 const repaintSettings = () => (M.kind === 'settings' ? ($('#modal').innerHTML = settingsHtml()) : null);
@@ -254,6 +255,7 @@ INPUTS['col-name'] = (el) => (M.state.cols[+el.dataset.i].name = el.value);
 INPUTS['set-ticket'] = (el) => (M.state.ticketUrl = el.value);
 CHANGES['col-done'] = (el) => (M.state.cols[+el.dataset.i].done = el.checked);
 CHANGES['set-inherit'] = (el) => (M.state.inheritChildren = el.checked);
+CHANGES['set-follow'] = (el) => (M.state.followSessions = el.checked);
 CHANGES['set-autostart'] = (el) => (M.state.autostart = el.checked);
 ACTIONS['col-add'] = () => {
   M.state.cols.push({ name: 'New column' });
@@ -275,7 +277,7 @@ ACTIONS['settings-save'] = async () => {
   const st = M.state;
   const cols = st.cols.filter((c) => c.name.trim());
   const okCols = await op('columns.set', { columns: cols });
-  const okSet = okCols && (await op('settings.update', { ticketUrl: st.ticketUrl.trim(), inheritChildren: st.inheritChildren, autostart: st.autostart }));
+  const okSet = okCols && (await op('settings.update', { ticketUrl: st.ticketUrl.trim(), inheritChildren: st.inheritChildren, autostart: st.autostart, followSessions: st.followSessions }));
   if (okSet) {
     closeModal(null);
     toast('Saved.');

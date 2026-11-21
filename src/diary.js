@@ -33,7 +33,7 @@ const READ_DIR = path.join(P.CACHE_DIR, 'diary');
 const MAX = { p: 400, a: 300, r: 500, s: 160, c: 160, f: 200 }; // characters kept per entry
 const CAP = { p: 60, a: 40, r: 40, s: 60, c: 40, f: 60, pr: 20, o: 1 }; // entries kept per session per day
 
-let rev = 0; // goes up whenever what the diary would show has changed
+let rev = Date.now(); // goes up whenever what the diary would show has changed; never repeats across restarts
 let notes = {};
 let notesSig = '{}';
 let progress = { total: 0, left: 0 };
@@ -645,6 +645,9 @@ function sync(state) {
     const keys = (s.cliId ? [s.cliId, ...(s.priorCliIds || [])] : [s.id]).filter(safeKey);
     for (const key of keys) {
       const m = r.s[key] || (r.s[key] = {});
+      // Claude dropped the session but its transcript is still on disk, so it now looks like a
+      // terminal session named after its first prompt: keep what the diary knew it as
+      if (s.source === 'cli' && m.sid && m.sid !== s.id) continue;
       const had = m.card || null;
       if (
         m.sid === s.id && m.title === s.title && m.project === s.projectName && m.source === s.source && !!m.archived === !!s.archived &&
@@ -677,6 +680,13 @@ function sync(state) {
     rev++;
   }
   flush();
+}
+
+/** The title a session had when the board last saw it; '' when it never did. */
+function titleOf(sessionId) {
+  const r = registry().s;
+  for (const key of Object.keys(r)) if (r[key].sid === sessionId && r[key].title) return r[key].title;
+  return '';
 }
 
 function setNotes(n) {
@@ -976,6 +986,6 @@ function markdown(opts, state) {
 }
 
 module.exports = {
-  sync, crawl, setNotes, page, markdown, refresh, stats, rev: () => rev,
+  sync, crawl, setNotes, page, markdown, refresh, stats, titleOf, rev: () => rev,
   dayOf, parseDay, shiftDay, isDay, commitMessage, DAYS_DIR, REG_FILE, MAX, CAP,
 };

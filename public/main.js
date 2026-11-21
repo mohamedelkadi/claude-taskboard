@@ -41,16 +41,13 @@ document.addEventListener('focusout', (e) => {
 });
 
 document.addEventListener('pointerdown', () => (S.pointerDown = true), true);
-const pointerReleased = () =>
-  setTimeout(() => {
-    S.pointerDown = false;
-    if (S.renderPending) {
-      S.renderPending = false;
-      render();
-    }
-  }, 0);
+const pointerReleased = () => setTimeout(releasePointer, 0);
 document.addEventListener('pointerup', pointerReleased, true);
 document.addEventListener('pointercancel', pointerReleased, true);
+// A pointer marked down holds every repaint back, so a release that never gets reported
+// must not outlast the next move: a pointer that moves with no button held is not down.
+document.addEventListener('pointermove', (e) => S.pointerDown && e.buttons === 0 && releasePointer(), true);
+window.addEventListener('blur', releasePointer);
 
 document.addEventListener('keydown', (e) => {
   const t = e.target;
@@ -118,9 +115,18 @@ window.addEventListener('hashchange', () => {
   render();
 });
 
+// The server sends its versions on every change and every 15 seconds. A stream
+// that has gone quiet is dead, whatever the browser says about it: that happens
+// when the Mac sleeps or the window sits hidden for hours.
+let stream = null;
+let lastBeat = 0;
+let lastWake = 0;
+
 function connect() {
-  const es = new EventSource('/api/events');
+  if (stream) stream.close();
+  const es = (stream = new EventSource('/api/events'));
   es.onmessage = (e) => {
+    lastBeat = Date.now();
     S.connected = true;
     let v = 0;
     let diary = 0;
@@ -129,17 +135,29 @@ function connect() {
       v = j.version;
       diary = j.diary || 0;
     } catch (_) {}
-    const news = diary > S.diary.latest; // the Diary view fetches again when it is the one showing
+    const news = diary !== S.diary.latest; // the Diary view fetches again when it is the one showing
     if (news) S.diary.latest = diary;
     if (!S.data || v !== S.data.version) loadState().catch(() => {});
     else if (news && S.view === 'diary') render();
     else renderTop();
   };
   es.onerror = () => {
-    S.connected = false; // the browser retries on its own
+    S.connected = false; // the browser retries on its own; wake() takes over if it gives up
     if (S.data) renderTop();
   };
 }
+
+/** Catch up after the window was hidden, the Mac slept, or the stream went quiet. */
+function wake() {
+  if (Date.now() - lastWake < 3000) return;
+  lastWake = Date.now();
+  if (!stream || stream.readyState === 2 || Date.now() - lastBeat > 40000) connect();
+  loadState().catch(() => {});
+}
+document.addEventListener('visibilitychange', () => !document.hidden && wake());
+window.addEventListener('focus', wake);
+window.addEventListener('pageshow', wake);
+window.addEventListener('online', wake);
 
 (async function init() {
   initBoardDnD();
@@ -153,6 +171,9 @@ function connect() {
   readHash();
   render();
   connect();
+  setInterval(() => {
+    if (Date.now() - lastBeat > 40000) wake();
+  }, 10000);
   // keep "5m ago" honest
   setInterval(() => {
     if (!S.drag && !S.pointerDown && !M.kind && S.view !== 'graph') render();

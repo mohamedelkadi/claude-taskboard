@@ -21,7 +21,9 @@ let scanResult = { sessions: [], groups: [], scannedAt: 0 };
 let state = null;
 let stateJson = '{}';
 let stateHash = '';
-let version = 0;
+// Counts up from the time the server started, so a page left open across a restart never
+// mistakes the new server's numbers for ones it already has.
+let version = Date.now();
 let lastError = '';
 let announced = '';
 const clients = new Set();
@@ -88,16 +90,25 @@ function rebuild() {
   return changed;
 }
 
+/** One look at Claude's files, and what follows from it: sessions join cards, cards move on. */
+function look() {
+  scanResult = claude.scan();
+  const found = view.applyRemember(scanResult);
+  if (found) log('found', found, 'sessions again under a new id');
+  const linked = view.applyAutoLinks(scanResult);
+  if (linked) log('auto-linked', linked, 'sessions');
+  const moved = view.applyAutoMoves(scanResult);
+  if (moved.length) log('moved to In progress:', moved.join(', '));
+  rebuild();
+}
+
 function rescan() {
   try {
-    scanResult = claude.scan();
     if (!store.exists()) {
-      const made = view.seed(scanResult);
+      const made = view.seed(claude.scan());
       if (made) log('first run: imported', JSON.stringify(made));
     }
-    const linked = view.applyAutoLinks(scanResult);
-    if (linked) log('auto-linked', linked, 'sessions');
-    rebuild();
+    look();
     lastError = '';
     crawl();
     diary.crawl(announce).catch((e) => log('diary:', e.message));
@@ -126,25 +137,25 @@ async function crawl() {
       } catch (e) {
         log('transcript', s.cliId, e.message);
       }
-      if (read && read % 20 === 0) {
-        scanResult = claude.scan();
-        rebuild();
-      }
+      if (read && read % 20 === 0) look();
     }
-    if (read) {
-      scanResult = claude.scan();
-      rebuild();
-    }
+    // a transcript's first prompt can name the card the session was started for
+    if (read) look();
   } finally {
     crawling = false;
   }
 }
 
+// A burst of file events is one look at Claude's files: the first starts it a moment later
+// (a look costs a few dozen milliseconds), and none follows another closer than SCAN_GAP, so a
+// session that writes all the time costs one a second rather than one per write.
+const SCAN_LEAD = 100;
+const SCAN_GAP = 1000;
 let timer = null;
 let lastScan = 0;
 function scheduleScan() {
   if (timer) return;
-  const wait = Math.max(700, 1500 - (Date.now() - lastScan));
+  const wait = Math.max(SCAN_LEAD, SCAN_GAP - (Date.now() - lastScan));
   timer = setTimeout(() => {
     timer = null;
     lastScan = Date.now();
@@ -152,10 +163,29 @@ function scheduleScan() {
   }, wait);
 }
 
-function watch(target, opts, filter) {
+// The board file changed: by this server, by `taskboard` in a terminal, or by a Claude session
+// through MCP. What the page shows depends only on that file and on the last look at Claude's
+// files, so show it now, without waiting for a look; then take that look anyway, for what a
+// changed board sets off (sessions joining cards, cards moving on).
+let boardTimer = null;
+function boardChanged() {
+  if (!boardTimer) {
+    boardTimer = setTimeout(() => {
+      boardTimer = null;
+      try {
+        if (state) rebuild();
+      } catch (e) {
+        log('rebuild failed:', e.message);
+      }
+    }, 20);
+  }
+  scheduleScan();
+}
+
+function watch(target, opts, filter, onChange) {
   try {
     fs.watch(target, opts, (_ev, file) => {
-      if (!filter || filter(file)) scheduleScan();
+      if (!filter || filter(file)) (onChange || scheduleScan)();
     }).on('error', () => {});
   } catch (_) {}
 }
@@ -307,12 +337,20 @@ function main() {
     watch(P.DESKTOP_SESSIONS_DIR, { recursive: true });
     watch(P.LIVE_DIR, {});
     watch(P.DESKTOP_DIR, {}, (f) => f === path.basename(P.DESKTOP_CONFIG));
-    watch(P.DATA_DIR, {}, (f) => f === path.basename(P.BOARD_FILE));
-    // Safety net for anything the watchers miss (and for busy/idle flips).
-    setInterval(scheduleScan, 20000).unref();
+    watch(P.DATA_DIR, {}, (f) => f === path.basename(P.BOARD_FILE), boardChanged);
+    // what moves a session's step list along, and the diary's days, as it works
+    watch(P.PROJECTS_DIR, { recursive: true }, (f) => !f || f.endsWith('.jsonl'));
+    watch(P.CLAUDE_DIR, {}, (f) => f === path.basename(P.HISTORY_FILE));
+    // Safety net for what a watcher can miss: events dropped while the Mac slept, or a
+    // session whose process died without a trace in any file. The watchers keep the board
+    // current; this only makes sure a lost event is not a lost update.
+    setInterval(scheduleScan, 15000).unref();
+    // A heartbeat the page can hear: when it stops, the page knows its connection died
+    // (the Mac slept, the window sat hidden for hours) and fetches the board again.
     setInterval(() => {
-      for (const res of clients) res.write(': ping\n\n');
-    }, 25000).unref();
+      const beat = `data: ${versions()}\n\n`;
+      for (const res of clients) res.write(beat);
+    }, 15000).unref();
   });
   const bye = () => {
     try {

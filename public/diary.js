@@ -6,7 +6,9 @@
 const DIARY_KIND = { p: 'You', a: 'Claude', r: 'Recap', s: 'Done', c: 'Commit', pr: 'PR', f: 'Files' };
 const DIARY_FOLD = 8; // rows of a session shown before "Show all"
 
-const diaryWant = () => `${S.diary.day}|${S.q.trim()}|${S.project}`;
+// a typed search looks in every project, as it does on the board
+const diaryProject = () => (S.q.trim() ? '' : S.project);
+const diaryWant = () => `${S.diary.day}|${S.q.trim()}|${diaryProject()}`;
 
 /** Fetch what the view needs. Typing in the search box waits a moment first. */
 function loadDiary(now) {
@@ -20,7 +22,7 @@ function loadDiary(now) {
     const id = ++D.req;
     let j = null;
     try {
-      const res = await fetch('/api/diary?' + new URLSearchParams({ day: D.day, q: S.q.trim(), project: S.project }));
+      const res = await fetch('/api/diary?' + new URLSearchParams({ day: D.day, q: S.q.trim(), project: diaryProject() }));
       j = await res.json();
     } catch (_) {}
     if (id !== D.req) return; // a newer request is on its way
@@ -30,7 +32,7 @@ function loadDiary(now) {
       D.data = j;
       D.key = want;
       D.v = j.v;
-      if (j.v > D.latest) D.latest = j.v;
+      D.latest = j.v; // the answer is the newest word; the stream says when that changes
     }
     if (S.view === 'diary') renderMain();
   }, now ? 0 : 220);
@@ -194,7 +196,7 @@ function diarySessionHead(s, terms) {
       ${title}
       ${projChip(s.projectName)} ${card} ${flag} ${(s.prs || []).map(prChip).join(' ')}
       <span class="grow"></span>
-      ${s.exists ? `<button class="icon-btn" data-act="open-session" data-session="${esc(s.id)}" title="${s.source === 'cli' ? 'Copy the command that resumes it' : 'Open in Claude'}">↗</button>` : ''}
+      ${s.exists ? openButton(s) : ''}
     </header>`;
 }
 
@@ -239,7 +241,8 @@ function diaryDay(d) {
 function diaryResults(d) {
   const r = d.results;
   if (!r.total) return `<h2>Nothing in the diary matches “${esc(r.q)}”</h2><div class="empty-state">The diary searches what you asked, what Claude reported back, commits, pull requests, file names and your notes.</div>`;
-  const out = [`<h2>${count(r.total, 'match')} for “${esc(r.q)}” <span class="muted">on ${count(r.days.length, 'day')}</span></h2>`];
+  const asked = /^".*"$/.test(r.q) ? esc(r.q) : `“${esc(r.q)}”`; // a quoted phrase brings its own quotes
+  const out = [`<h2>${count(r.total, 'match')} for ${asked} <span class="muted">on ${count(r.days.length, 'day')}</span></h2>`];
   let day = '';
   for (const it of r.items) {
     if (it.day !== day) {
@@ -266,7 +269,7 @@ function diaryResults(d) {
 function renderDiary() {
   const D = S.diary;
   const want = diaryWant();
-  const stale = !D.data || D.key !== want || D.latest > D.v;
+  const stale = !D.data || D.key !== want || D.latest !== D.v;
   // each thing is asked for once, so a request that failed is not repeated forever
   if (stale && D.asked !== `${want}|${D.latest}`) loadDiary(!D.data || D.key === want);
   if (!D.data) {
@@ -310,6 +313,15 @@ function diaryStep(n) {
 }
 
 ACTIONS['diary-day'] = (el) => diaryGo(el.dataset.day || '');
+// from a card: every day a session worked, found by its name
+ACTIONS['diary-find'] = (el) => {
+  S.q = `"${el.dataset.q}"`;
+  $('#q').value = S.q;
+  S.view = 'diary';
+  S.cardId = null;
+  setHash();
+  render();
+};
 ACTIONS['diary-retry'] = () => {
   S.diary.asked = '';
   renderMain();

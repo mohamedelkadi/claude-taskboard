@@ -11,6 +11,8 @@ const path = require('path');
 const P = require('./paths');
 
 const CACHE_V = 4;
+// the desktop session index has its own version: it changes when a field is added to a session's record
+const DESKTOP_V = 5;
 
 function readJSON(file) {
   try {
@@ -79,6 +81,21 @@ function trimText(s, max) {
 
 // ---------- desktop sessions ----------
 
+/**
+ * Other project folders a session worked in. A session started in a folder that holds
+ * several repos (~/work) lists the repos it ran commands in under shellFolders, and those
+ * say more about what it is about than the parent folder does. Scratch folders are left out.
+ */
+function alsoIn(folders, own) {
+  const out = [];
+  for (const f of Array.isArray(folders) ? folders : []) {
+    if (typeof f !== 'string' || /^\/(private\/)?(tmp|var\/folders)\//.test(f)) continue;
+    const name = projectOf(f).name;
+    if (name && name !== own && name !== 'No folder' && name !== 'Unknown' && !out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
 function slimDesktop(d) {
   const proj = projectOf(d.cwd || d.originCwd);
   const pts = d.postTurnSummary || null;
@@ -98,6 +115,7 @@ function slimDesktop(d) {
     cwd: d.cwd || d.originCwd || '',
     project: proj.root,
     projectName: proj.name,
+    alsoIn: alsoIn(d.shellFolders, proj.name),
     createdAt: Number(d.createdAt) || 0,
     lastActivityAt: Number(d.lastActivityAt) || Number(d.createdAt) || 0,
     archived: !!d.isArchived,
@@ -132,7 +150,7 @@ let desktopCacheDirty = false;
 function loadDesktopCache() {
   if (desktopCache) return;
   const saved = readJSON(path.join(P.CACHE_DIR, 'desktop-index.json'));
-  desktopCache = saved && saved.v === CACHE_V && saved.files ? saved.files : {};
+  desktopCache = saved && saved.v === DESKTOP_V && saved.files ? saved.files : {};
 }
 
 function scanDesktopSessions() {
@@ -178,7 +196,7 @@ function scanDesktopSessions() {
     }
   }
   if (desktopCacheDirty) {
-    writeCache('desktop-index.json', { v: CACHE_V, files: desktopCache });
+    writeCache('desktop-index.json', { v: DESKTOP_V, files: desktopCache });
     desktopCacheDirty = false;
   }
   return out;
@@ -559,7 +577,7 @@ function scan() {
     const proj = projectOf(cwd);
     const title = (d && (cleanPrompt(d.title) || d.firstPrompt)) || (live[cliId] && live[cliId].name) || 'Terminal session';
     sessions.push({
-      id: cliId, cliId, source: 'cli', title: trimText(title, 160), cwd, project: proj.root, projectName: proj.name,
+      id: cliId, cliId, source: 'cli', title: trimText(title, 160), cwd, project: proj.root, projectName: proj.name, alsoIn: [],
       createdAt: Math.round((d && d.startedAt) || st.birthtimeMs || st.mtimeMs), lastActivityAt: Math.round(st.mtimeMs),
       archived: false, starred: false, model: '', branch: '', worktree: '', prs: [], parentId: null, forkedFrom: null, routineId: null,
       summary: null, wrapUp: '', lastReport: '', artifacts: [], turns: 0, error: '', tickets: ticketsIn(title), link: '',
@@ -589,6 +607,9 @@ function scan() {
         : null;
       s.cost = d.cost || 0;
       if (!s.wrapUp && d.wrap) s.wrapUp = d.wrap.recap;
+      // "Start a session" on a card opens Claude with a brief that names the card
+      const brief = /^Work on Taskboard card ([A-Za-z][A-Za-z0-9]*-\d+)\b/.exec(d.firstPrompt || '');
+      if (brief) s.briefCard = brief[1].toUpperCase();
     } else {
       s.steps = null;
       s.cost = 0;

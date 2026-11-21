@@ -9,7 +9,7 @@ const S = {
   cardId: null, // card open in the drawer
   expanded: new Set(), // sub-tasks unfolded in the drawer
   details: new Map(), // session id -> transcript detail
-  showDoneSubs: false,
+  showDoneSubs: true, // ticked-off checklist items stay in sight until hidden
   showAuto: false,
   editDesc: false,
   editSub: null,
@@ -35,6 +35,7 @@ const S = {
     wide: new Set(), // long entries shown in full
   },
   drag: null,
+  pending: new Map(), // card id -> { status, beforeId }: a move the board has not confirmed yet
   swapping: false,
   pointerDown: false,
   renderPending: false,
@@ -111,8 +112,21 @@ function hue(text) {
 
 const projChip = (name) => (name ? `<span class="chip proj" style="--h:${hue(name)}" title="Project">${esc(name)}</span>` : '');
 
+/** The tracker key inside a link (…/browse/PROJ-12), if there is one. */
+const ticketKeyIn = (url) => (/(?:^|[^A-Za-z0-9])([A-Z][A-Z0-9]{1,7}-\d{1,6})(?![A-Za-z0-9])/.exec(String(url || '')) || [])[1] || '';
+
 function ticketChip(key) {
   if (!key) return '';
+  if (/^https?:\/\//i.test(key)) {
+    // a link typed as the ticket: show where it goes, not the whole address
+    let label = ticketKeyIn(key);
+    try {
+      label = label || new URL(key).hostname.replace(/^www\./, '');
+    } catch (_) {
+      return '';
+    }
+    return `<a class="chip ticket" href="${esc(key)}" target="_blank" rel="noopener" title="${esc(key)}" data-stop>${esc(label)} ↗</a>`;
+  }
   const tpl = S.data.settings.ticketUrl;
   if (tpl && /^https?:\/\//.test(tpl)) {
     return `<a class="chip ticket" href="${esc(tpl.replace('{key}', encodeURIComponent(key)))}" target="_blank" rel="noopener" data-stop>${esc(key)}</a>`;
@@ -128,6 +142,20 @@ function prChip(pr) {
   return /^https:\/\//.test(pr.url || '')
     ? `<a class="chip ${cls}" href="${esc(pr.url)}" target="_blank" rel="noopener" title="${esc(title)}" data-stop>${esc(label)}</a>`
     : `<span class="chip ${cls}" title="${esc(title)}">${esc(label)}</span>`;
+}
+
+/**
+ * The way from the board into a session. A labelled button wherever a session is
+ * shown, never an icon to be found: opening the session is what the board is for.
+ * A session that ran in a terminal cannot be opened in the app, so its button
+ * copies the command that resumes it.
+ */
+function openButton(s, look) {
+  if (!s || !s.id) return '';
+  const cli = s.source === 'cli';
+  const label = cli ? 'Copy resume<span class="wide"> command</span>' : 'Open<span class="wide"> in Claude</span>';
+  const title = cli ? 'It ran in a terminal: copies the command that resumes it' : 'Open this session in the Claude app';
+  return `<button class="btn small open-btn${look ? ' ' + look : ''}" data-act="open-session" data-session="${esc(s.id)}" title="${title}" data-stop>${label}</button>`;
 }
 
 const stateChip = (state) => `<span class="state-chip ${esc(state)}">${esc(STATE_LABEL[state] || state)}</span>`;
@@ -171,16 +199,38 @@ function matches(text) {
   return !q || text.toLowerCase().includes(q);
 }
 
+/**
+ * A typed search looks at everything. The project dropdown and the Sessions filters
+ * (unsorted, state, archived) narrow what is listed when nothing is typed; once something
+ * is, they step aside, so a title always finds its session whatever was left switched on.
+ */
+const searching = () => !!S.q.trim();
+
+/** Did the session run in this project: the folder it started in, or a repo it also worked in? */
+const inProject = (s, name) => s.projectName === name || (s.alsoIn || []).includes(name);
+
 function cardMatches(card) {
-  if (S.project && card.project !== S.project && !card.view.subs.some((sub) => (ix().sessions.get(sub.sessionId) || {}).projectName === S.project)) return false;
-  if (!S.q.trim()) return true;
-  return matches([card.key, card.title, card.ticket, card.project, card.tags.join(' '), card.view.subs.map((s) => s.title).join(' '), card.view.tickets.join(' ')].join(' '));
+  if (searching()) {
+    return matches([card.key, card.title, card.ticket, card.project, card.tags.join(' '), card.view.subs.map((s) => s.title).join(' '), card.view.tickets.join(' ')].join(' '));
+  }
+  if (!S.project) return true;
+  return card.project === S.project || card.view.subs.some((sub) => {
+    const s = ix().sessions.get(sub.sessionId);
+    return s && inProject(s, S.project);
+  });
 }
 
 function sessionMatches(s) {
-  if (S.project && s.projectName !== S.project) return false;
-  if (!S.q.trim()) return true;
-  return matches([s.title, s.projectName, s.branch, s.tickets.join(' '), s.prs.map((p) => '#' + p.number).join(' '), (s.summary && s.summary.needsAction) || ''].join(' '));
+  if (!searching()) return !S.project || inProject(s, S.project);
+  const card = s.cardId && ix().cards.get(s.cardId);
+  return matches(
+    [s.title, s.projectName, (s.alsoIn || []).join(' '), s.branch, s.tickets.join(' '), s.prs.map((p) => '#' + p.number).join(' '), (s.summary && s.summary.needsAction) || '', card ? `${card.key} ${card.title}` : ''].join(' ')
+  );
+}
+
+/** What is narrowing a list right now, in words, for the empty states. */
+function activeFilters(parts) {
+  return [...parts, S.project && `project ${S.project}`].filter(Boolean).join(', ');
 }
 
 // ---------- talking to the server ----------
@@ -199,17 +249,28 @@ async function post(path, body) {
   return res.json();
 }
 
-/** Run one board operation; the server answers with the fresh state. */
-async function op(name, args) {
+/**
+ * Run one board operation; the server answers with the fresh state. `settle` runs the
+ * moment the answer is in, however it went, before anything is painted from it: a page
+ * that showed the change early drops its "saving" marks there, and puts things back
+ * as the board has them when the change did not go through.
+ */
+async function op(name, args, settle) {
   try {
     const j = await post('/api/op', { name, args });
+    if (settle) settle();
     if (!j.ok) {
       toast(j.error || 'That did not work.', 'error');
+      if (settle) renderWhenSafe();
       return null;
     }
     setData(j.state);
     return j.result == null ? true : j.result;
   } catch (_) {
+    if (settle) {
+      settle();
+      renderWhenSafe();
+    }
     toast('The board server is not responding. Run "taskboard start".', 'error');
     return null;
   }
@@ -224,7 +285,10 @@ function setData(d) {
   if (!d || !d.columns) return;
   S.data = d;
   IX = null;
-  if (S.cardId && !ix().cards.has(S.cardId)) S.cardId = null;
+  if (S.cardId && !ix().cards.has(S.cardId)) {
+    S.cardId = null; // the open card was deleted, here or by a session
+    setHash();
+  }
   for (const id of [...S.sel]) if (!ix().sessions.has(id)) S.sel.delete(id);
   renderWhenSafe();
 }
@@ -238,6 +302,19 @@ function renderWhenSafe() {
   if (S.drag) S.drag.stale = true;
   else if (S.pointerDown) S.renderPending = true;
   else render();
+}
+
+/**
+ * The pointer is up, or a drag has taken it over: paint what was held back. Engines
+ * disagree about which events say so (WebKit sends no pointercancel when a drag starts,
+ * WebKit bug 222632), so this is called from every place that can know.
+ */
+function releasePointer() {
+  S.pointerDown = false;
+  if (S.renderPending && !S.drag) {
+    S.renderPending = false;
+    render();
+  }
 }
 
 async function openSession(id) {
@@ -341,6 +418,11 @@ function renderTop() {
 
 function renderMain() {
   const main = $('#main');
+  const dropdown = $('#project');
+  if (dropdown) {
+    dropdown.classList.toggle('paused', searching());
+    dropdown.title = searching() ? 'A search looks in every project' : 'Project';
+  }
   if (S.view === 'needs') return swap(main, renderNeeds());
   if (S.view === 'sessions') return swap(main, renderSessions());
   if (S.view === 'graph') return renderGraph(main);
@@ -386,7 +468,7 @@ function openCard(id) {
     S.expanded.clear();
     S.editDesc = false;
     S.editSub = null;
-    S.showDoneSubs = false;
+    S.showDoneSubs = true;
     S.showAuto = false;
   }
   S.cardId = id;

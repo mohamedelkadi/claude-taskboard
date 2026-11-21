@@ -63,6 +63,7 @@ function snapshot() {
   const scanResult = claude.scan();
   if (!store.exists()) view.seed(scanResult); // first use, before the web server got to it
   view.applyAutoLinks(scanResult);
+  view.applyAutoMoves(scanResult);
   return view.buildState(store.load(), scanResult);
 }
 
