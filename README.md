@@ -113,6 +113,14 @@ Further down the card:
 
 ![Sessions: every session with its state, project, card and pull requests](docs/screenshots/sessions.png)
 
+**When you remember what a session was about but not what it was called**, type it in the search box (`/`). A panel under the box lists the sessions whose conversation best matches, with the passages that matched and an **Open in Claude** button. `↑` `↓` move through them, `Enter` opens one and `Esc` closes the panel.
+
+- It looks at what you asked, what Claude replied, and the commands and file paths used. Tool output and subagents are left out.
+- Any word can match, and rarer words count for more. A "quoted phrase" has to appear as written.
+- A misspelled word is also tried corrected, and the panel says so (`digram` also searches for **diagram**).
+- Paste a pull request or ticket link, or type a key like `SHOP-212`, to find the session behind it.
+- Likely passwords, tokens and keys are removed before anything is stored, and a session's text leaves the index when Claude deletes its transcript. The index is about 70 MB for 3.7 GB of transcripts, and a first build takes about 10 seconds in the background.
+
 ### 6. See how tasks connect
 
 **Connections** draws the cards as a graph: the connections you made, plus dashed ones the board detected. Drag cards to arrange them, scroll to zoom, and tick "Show open sessions" to see the sessions around each card.
@@ -142,6 +150,7 @@ Every Claude Code session (desktop app and terminal) gets the `board` skill and 
 - "move TB-4 to review" · "TB-4 is blocked by the SDK upgrade card"
 - "add a note to the card with where we got to"
 - "what did I do yesterday" · "write my standup from the diary" · "when did I fix the export"
+- "find the session where we talked about the coupon rollback"
 
 `/board` opens the board beside the chat. The page fits the narrow pane:
 
@@ -159,6 +168,7 @@ Each card is also a file Claude can read: `~/.claude/taskboard/cards/TB-4.md`.
 | `board_connect_cards` | Connect two cards |
 | `board_add_note` | Leave context for the next session |
 | `board_find_sessions` | Find sessions by title, ticket, PR or state |
+| `board_search_conversations` | Search inside every session, for one you remember but cannot name |
 | `board_diary` | What you did on a day or over a span of days, or a search across every day |
 | `board_diary_note` | Add a line to your own note for a day |
 
@@ -171,6 +181,7 @@ taskboard move TB-3 "In review" taskboard sub TB-3 "<title>"
 taskboard note TB-3 "<text>"    taskboard link TB-3 [session-id]
 taskboard connect TB-3 TB-7 blocks
 taskboard sessions [query] [--unsorted]
+taskboard search "<words>" [--project name] [--limit 10]
 taskboard diary [today|yesterday|YYYY-MM-DD] [--days 7] [--project name]
 taskboard diary --search "<words>"
 taskboard start | stop | restart | status | doctor
@@ -188,7 +199,7 @@ Reads, never changes:
 
 - `~/Library/Application Support/Claude/claude-code-sessions/` — the desktop app's record of each session (title, PRs, parent session, status summary, archived)
 - `~/Library/Application Support/Claude/claude_desktop_config.json` — sidebar groups only
-- `~/.claude/projects/*/*.jsonl` — transcripts, for each session's step list and last recap
+- `~/.claude/projects/*/*.jsonl` — transcripts, for each session's step list, last recap and conversation search
 - `~/.claude/sessions/` — which sessions are running
 - `~/.claude/history.jsonl` — once, for prompts typed in a terminal in sessions whose transcript Claude had already deleted
 
@@ -197,7 +208,7 @@ Writes:
 - `~/.claude/taskboard/board.json` — the board (hourly copies in `backups/`)
 - `~/.claude/taskboard/cards/*.md` and `BOARD.md` — generated copies for Claude to read
 - `~/.claude/taskboard/diary/` — the diary: one file per day in `days/`, and each session's title, project and card in `sessions.json`. Plain JSON; delete a day's file to forget that day
-- `~/.claude/taskboard/cache/` — what it has already read from transcripts, and how far
+- `~/.claude/taskboard/cache/` — what it has already read from transcripts, and how far. `cache/search/index.db` is the conversation search index; it is safe to delete and is rebuilt from the transcripts
 - `~/.claude/skills/board/SKILL.md` — the skill
 - `~/.claude.json` — one entry, the `taskboard` MCP server (added with `claude mcp add --scope user`)
 - `~/.local/bin/taskboard` — the command
@@ -226,7 +237,7 @@ taskboard uninstall --purge  # also deletes the board and the diary
 ## Development
 
 ```bash
-npm test                     # 30 tests, against fake Claude folders in a temp directory
+npm test                     # 39 tests, against fake Claude folders in a temp directory
 ```
 
 ```bash
@@ -237,7 +248,7 @@ npm run demo                 # the board on made-up data, on port 4781
 npm run screenshots          # retake docs/screenshots from the demo (needs Node 22+ and Chrome)
 ```
 
-No dependencies and no build step. `src/store.js` is the board and its operations; `src/claude.js` reads Claude's files; `src/view.js` joins the two (statuses, detected connections, linking rules, first-run import); `src/diary.js` keeps the diary; `src/server.js`, `src/mcp.js` and `src/cli.js` are the three ways in; `public/` is the page; `macapp/` is the Mac app, a thin window around that page.
+No dependencies and no build step. `src/store.js` is the board and its operations; `src/claude.js` reads Claude's files; `src/view.js` joins the two (statuses, detected connections, linking rules, first-run import); `src/diary.js` keeps the diary; `src/search.js` keeps the conversation index; `src/server.js`, `src/mcp.js` and `src/cli.js` are the three ways in; `public/` is the page; `macapp/` is the Mac app, a thin window around that page.
 
 ## Limits
 
@@ -246,6 +257,8 @@ No dependencies and no build step. `src/store.js` is the board and its operation
 - The board is told of changes rather than asking for them. It watches its own file and Claude's session folders, transcripts and prompt history, and tells the page the moment something changes: a card moved from a terminal or by a Claude session shows in about a tenth of a second, a session's progress within a second or two. A check every 15 seconds catches anything the watchers miss, such as a session process that died without writing anything. If the page's connection drops (the Mac slept, the window sat hidden) it reconnects and catches up by itself.
 - The diary starts from the transcripts still on disk the first time it runs. For older days it has only what the session records and the terminal's prompt history hold: titles, last reports and prompts.
 - The diary holds the beginning of each prompt and reply in plain text, as Claude's own transcripts do. It stays on your Mac, in the folder above.
+- Searching inside conversations needs Node 22.13 or newer, for its built-in SQLite. On an older Node everything else works and the search panel says why it is off.
+- That search matches words, not meaning, so a description that shares no words with the session can miss it. Removing secrets works from known patterns and can miss an unusual one; the index stays on your Mac, in a folder only you can read.
 - macOS only for now: the desktop app's folder and the Mac app are Mac-specific.
 
 ## License

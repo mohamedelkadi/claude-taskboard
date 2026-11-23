@@ -24,6 +24,7 @@ document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.id === 'q') {
     S.q = t.value;
+    convoInput();
     return renderMain();
   }
   if (t.dataset.input && INPUTS[t.dataset.input]) INPUTS[t.dataset.input](t);

@@ -10,6 +10,7 @@ const store = require('./store');
 const claude = require('./claude');
 const view = require('./view');
 const diary = require('./diary');
+const search = require('./search');
 const daemon = require('./daemon');
 const macapp = require('./macapp');
 
@@ -33,6 +34,7 @@ const HELP = `taskboard — a kanban board over your Claude sessions
   taskboard link <card> [session-id]        link a session (default: the Claude session running this)
   taskboard connect <from> <to> [blocks|relates|parent]
   taskboard sessions [query] [--unsorted]   find sessions
+  taskboard search "<words>" [--project name] [--limit 10]   search inside every conversation
   taskboard diary [today|yesterday|YYYY-MM-DD] [--days 7] [--project name]   what you did
   taskboard diary --search "<words>"         search every day
   taskboard app [--remove]      build the Mac app into ~/Applications (needs Xcode's Swift)
@@ -169,6 +171,10 @@ async function doctor() {
   console.log(`     ${scan.sessions.length} sessions found, ${scan.sessions.filter((s) => !s.archived).length} not archived, ${scan.groups.length} sidebar groups`);
   const kept = diary.stats();
   console.log(`     diary: ${kept.days} days, ${Math.max(1, Math.round(kept.bytes / 1024))} KB in ${P.DIARY_DIR}`);
+  const index = search.status();
+  console.log(index.available
+    ? `     conversation search: ${index.sessions} sessions, ${Math.round((index.bytes || 0) / 1e6)} MB in ${search.DB_FILE}`
+    : `     conversation search: off, it needs Node 22.13 or newer (this is ${index.node})`);
   if (up && up.error) console.log(`     last scan error: ${up.error}`);
 }
 
@@ -273,6 +279,10 @@ async function main() {
         console.log(`${s.id}  ${view.STATE_LABEL[s.estate].padEnd(16)} ${s.title.slice(0, 60).padEnd(60)} ${card ? card.key : '-'}`);
       }
       return;
+    }
+    case 'search': {
+      if (!a.length) throw new store.UserError('Give some words to search for: taskboard search "<words>"');
+      return console.log(search.markdown({ q: a.join(' '), limit: f.limit, project: f.project }, snapshot()));
     }
     case 'diary': {
       const day = a.length ? diary.parseDay(a[0]) : '';

@@ -12,6 +12,7 @@ const store = require('./store');
 const claude = require('./claude');
 const view = require('./view');
 const diary = require('./diary');
+const search = require('./search');
 
 const PUBLIC = path.join(__dirname, '..', 'public');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
@@ -112,6 +113,7 @@ function rescan() {
     lastError = '';
     crawl();
     diary.crawl(announce).catch((e) => log('diary:', e.message));
+    search.schedule(log);
   } catch (e) {
     lastError = e.message;
     log('scan failed:', e.message);
@@ -258,6 +260,10 @@ async function handle(req, res) {
       if (!state) return json(res, 503, { ok: false, error: 'The board is still starting.' });
       const arg = (name, max) => (url.searchParams.get(name) || '').slice(0, max);
       return json(res, 200, diary.page({ day: arg('day', 10), q: arg('q', 200), project: arg('project', 200) }, state));
+    }
+    if (p === '/api/search') {
+      if (!state) return json(res, 503, { ok: false, error: 'The board is still starting.' });
+      return json(res, 200, search.page({ q: (url.searchParams.get('q') || '').slice(0, 300), limit: 12 }, state));
     }
     if (p === '/api/export') {
       res.writeHead(200, { 'content-type': 'application/json', 'content-disposition': 'attachment; filename="taskboard-board.json"' });

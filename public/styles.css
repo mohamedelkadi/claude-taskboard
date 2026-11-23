@@ -483,3 +483,27 @@ mark { background: color-mix(in srgb, var(--needs) 38%, transparent); color: inh
 @media (max-width: 520px) {
   .sub > .open-btn .wide, .dsess-head .open-btn .wide { display: none; }
 }
+
+/* ---------- matches inside conversations, under the search box ---------- */
+#convo { position: fixed; z-index: 30; overflow-y: auto; overscroll-behavior: contain; background: var(--panel); border: 1px solid var(--line2); border-radius: var(--radius); box-shadow: var(--shadow); }
+#convo[hidden] { display: none; }
+.convo-top { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 9px 12px 7px; background: var(--panel); border-bottom: 1px solid var(--line); font-size: 12px; }
+.convo-note { padding: 6px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line); }
+.convo-note strong { color: var(--text); font-weight: 600; }
+.convo-empty { padding: 18px 12px; color: var(--muted); font-size: 13px; text-align: center; }
+.convo-row { padding: 9px 12px; border-bottom: 1px solid var(--line); }
+.convo-row:last-child { border-bottom: 0; }
+.convo-row[data-session] { cursor: pointer; }
+.convo-row[data-session]:hover, .convo-row.on { background: var(--raise); }
+.convo-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.convo-title { flex: 1; min-width: 0; font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.convo-head .open-btn { padding: 1px 8px; font-size: 11.5px; }
+.convo-head > .muted { flex: none; font-size: 11.5px; }
+.convo-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 5px; font-size: 11.5px; color: var(--muted); }
+.convo-hit { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 6px; margin-top: 3px; font-size: 12px; line-height: 1.45; }
+.convo-who { color: var(--faint); font-size: 11px; line-height: 17px; }
+.convo-text { overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+@media (max-width: 520px) {
+  .convo-head .open-btn .wide { display: none; }
+  .convo-hit { grid-template-columns: minmax(0, 1fr); gap: 0; }
+}

@@ -391,7 +391,7 @@ function renderTop() {
       </nav>
       <div class="grow"></div>
       <span class="conn-lost" id="conn-lost" hidden>Board server not reachable</span>
-      <input class="search" id="q" type="search" placeholder="Search cards and sessions  /" autocomplete="off">
+      <input class="search" id="q" type="search" placeholder="Search cards and conversations  /" autocomplete="off">
       <select class="field" id="project" data-change="project" title="Project"></select>
       <button class="btn primary" data-act="new-card">New card</button>
       <button class="icon-btn" data-act="theme" title="Switch light / dark">◐</button>
@@ -413,7 +413,7 @@ function renderTop() {
   }
   sel.value = x.projects.includes(S.project) ? S.project : '';
   $('#conn-lost').hidden = S.connected;
-  $('#q').placeholder = S.view === 'diary' ? 'Search the diary  /' : 'Search cards and sessions  /';
+  $('#q').placeholder = S.view === 'diary' ? 'Search the diary  /' : 'Search cards and conversations  /';
 }
 
 function renderMain() {
