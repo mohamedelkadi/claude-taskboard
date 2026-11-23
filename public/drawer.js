@@ -40,12 +40,8 @@ function sessionDetailHtml(s) {
   if (outcome) parts.push(`<div><h5>Outcome</h5>${esc(outcome)}</div>`);
   if (det && det.wrap && det.wrap.ask) parts.push(`<div><h5>It asked</h5>${esc(det.wrap.ask)}</div>`);
   if (det && det.firstPrompt) parts.push(`<div><h5>Started with</h5><div class="quote">${esc(det.firstPrompt)}</div></div>`);
-  if (s.artifacts.length) {
-    parts.push(`<div><h5>Pages it published</h5>${s.artifacts
-      .filter((a) => /^https:\/\//.test(a.url))
-      .map((a) => `<a class="chip" href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title || 'Artifact')}</a>`)
-      .join(' ')}</div>`);
-  }
+  const related = sessionResources(s);
+  if (related) parts.push(related);
   const facts = [s.projectName, s.branch && `branch ${s.branch}`, s.model, `started ${fullDate(s.createdAt)}`, det && det.cost ? `$${det.cost.toFixed(2)}` : '', s.archived ? 'archived in Claude' : ''].filter(Boolean);
   parts.push(`<div class="muted">${facts.map(esc).join(' · ')}</div>`);
   if (!det && entry && entry.loading) parts.unshift('<div class="muted">Reading the session…</div>');
@@ -179,7 +175,8 @@ function drawerHtml(card) {
         <label>Due<input class="field" type="date" data-keep="due" data-change="card-due" value="${esc(card.due || '')}"></label>
       </div>
       <datalist id="projects">${x.projects.map((p) => `<option value="${esc(p)}">`).join('')}</datalist>
-      ${card.ticket || v.tickets.length ? `<div class="sub-meta" style="margin-top:6px">${[...new Set([card.ticket, ...v.tickets].filter(Boolean))].map(ticketChip).join('')}${v.prs.map(prChip).join('')}</div>` : v.prs.length ? `<div class="sub-meta" style="margin-top:6px">${v.prs.map(prChip).join('')}</div>` : ''}
+      ${card.ticket || v.tickets.length ? `<div class="sub-meta" style="margin-top:6px">${[...new Set([card.ticket, ...v.tickets].filter(Boolean))].map(ticketChip).join('')}</div>` : ''}
+      ${relatedSection(card)}
 
       <div class="sec"><div class="sec-head"><h4>Description</h4></div>${desc}</div>
 

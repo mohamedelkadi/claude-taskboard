@@ -131,13 +131,14 @@ async function crawl() {
       .filter((s) => s.cliId && (s.cardId || !s.archived))
       .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
     let read = 0;
-    for (const s of want) {
-      if (!claude.detailIsStale(s.cliId)) continue;
+    // a resumed session's earlier transcripts hold links too
+    for (const cliId of want.flatMap((s) => [s.cliId, ...(s.priorCliIds || [])])) {
+      if (!claude.detailIsStale(cliId)) continue;
       try {
-        await claude.scanTranscript(s.cliId);
+        await claude.scanTranscript(cliId);
         read++;
       } catch (e) {
-        log('transcript', s.cliId, e.message);
+        log('transcript', cliId, e.message);
       }
       if (read && read % 20 === 0) look();
     }

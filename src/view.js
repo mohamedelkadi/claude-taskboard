@@ -7,6 +7,7 @@ const path = require('path');
 const P = require('./paths');
 const store = require('./store');
 const diary = require('./diary');
+const resources = require('./resources');
 
 const SUB_FROM_STATE = { running: 'in_progress', needs_you: 'blocked', review: 'review', done: 'done', idle: 'in_progress' };
 const STATE_LABEL = { running: 'running', needs_you: 'needs you', review: 'ready for review', done: 'done', idle: 'idle' };
@@ -151,7 +152,10 @@ function buildState(board, scanResult) {
       for (const t of s.tickets) tickets.add(t);
       if (s.lastActivityAt > lastActivityAt) lastActivityAt = s.lastActivityAt;
     }
-    return { ...card, view: { subs, counts, prs: [...prs.values()], tickets: [...tickets], lastActivityAt: lastActivityAt || card.updatedAt, folder: folderOf(card) } };
+    // a PR one session tracks is shown with its state, even if another only mentions it
+    const tracked = new Set([...prs.values()].map(resources.trackedPr));
+    const related = resources.merge(subs.map((sub) => (byId.get(sub.sessionId) || {}).resources)).filter((r) => !tracked.has(r.key));
+    return { ...card, view: { subs, counts, prs: [...prs.values()], resources: related, tickets: [...tickets], lastActivityAt: lastActivityAt || card.updatedAt, folder: folderOf(card) } };
   });
 
   // Connections nobody drew but the sessions imply.

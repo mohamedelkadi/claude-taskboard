@@ -9,6 +9,7 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const P = require('./paths');
+const resources = require('./resources');
 
 const CACHE_V = 4;
 // the desktop session index has its own version: it changes when a field is added to a session's record
@@ -460,7 +461,7 @@ function detailIsStale(cliId) {
   if (!d) return true;
   try {
     const st = fs.statSync(file);
-    return st.size !== d.size || st.mtimeMs !== d.mtimeMs;
+    return st.size !== d.size || st.mtimeMs !== d.mtimeMs || d.linksV !== resources.VERSION;
   } catch (_) {
     return false;
   }
@@ -516,7 +517,17 @@ async function readLines(file, from, size, onLine) {
  * append-only and can be hundreds of MB, so this continues from where the
  * previous read stopped and only decodes the few lines that matter.
  */
-async function scanTranscript(cliId) {
+function scanTranscript(cliId) {
+  // one read at a time per transcript: two would both continue from the same place
+  if (reading.has(cliId)) return reading.get(cliId);
+  const run = readTranscript(cliId).finally(() => reading.delete(cliId));
+  reading.set(cliId, run);
+  return run;
+}
+
+const reading = new Map();
+
+async function readTranscript(cliId) {
   const file = indexTranscripts()[cliId];
   if (!file) return cachedDetail(cliId);
   let st;
@@ -526,9 +537,19 @@ async function scanTranscript(cliId) {
     return cachedDetail(cliId);
   }
   let d = cachedDetail(cliId);
-  if (d && d.size === st.size && d.mtimeMs === st.mtimeMs) return d;
+  if (d && d.size === st.size && d.mtimeMs === st.mtimeMs && d.linksV === resources.VERSION) return d;
   if (!d || d.offset > st.size) d = freshDetail();
-  d.offset = await readLines(file, d.offset, st.size, (line) => handleLine(line, d));
+  if (d.linksV !== resources.VERSION) {
+    // read before links were collected: go over the part already read, once
+    const links = resources.fresh();
+    await readLines(file, 0, d.offset, (line) => resources.readLine(line, links));
+    d.links = links;
+    d.linksV = resources.VERSION;
+  }
+  d.offset = await readLines(file, d.offset, st.size, (line) => {
+    handleLine(line, d);
+    resources.readLine(line, d.links);
+  });
   d.size = st.size;
   d.mtimeMs = st.mtimeMs;
   detailMem.set(cliId, d);
@@ -614,6 +635,7 @@ function scan() {
       s.steps = null;
       s.cost = 0;
     }
+    s.resources = resources.forSession(s, [d, ...(s.priorCliIds || []).map(cachedDetail)]);
   }
   return { sessions, groups, scannedAt: Date.now() };
 }

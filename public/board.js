@@ -27,6 +27,7 @@ function cardFace(card) {
       <h3>${esc(card.title)}</h3>
       ${c.total ? `<div class="progress"><div class="bar"><i style="width:${pct}%"></i></div><span>${c.done}/${c.total}</span></div>` : ''}
       ${sig.length ? `<div class="signals">${sig.join('')}</div>` : ''}
+      ${cardResources(v)}
       <div class="card-foot">
         ${prs.map(prChip).join('')}${v.prs.length > 3 ? `<span class="muted">+${v.prs.length - 3}</span>` : ''}
         ${sessions ? `<span class="muted" title="Claude sessions on this card">${sessions} session${sessions === 1 ? '' : 's'}</span>` : ''}

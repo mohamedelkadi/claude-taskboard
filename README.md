@@ -85,6 +85,7 @@ Click a card to see everything about the task in one place.
 - Every session has an **Open in Claude** button, here and wherever else it is listed: the unsorted list, Needs me, Sessions and the Diary. A session that ran in a terminal gets **Copy resume command** instead.
 - **Start a session** opens Claude's new-session page in the folder of the card's **Project**, with a brief for this card in the prompt box (it also copies the brief, in case the page opens empty). The folder is the one earlier sessions of that project ran in; for a project no session has run in yet, you pick the folder in Claude. The new session reads the card and links itself to it.
 - **Link sessions…** adds existing sessions to the card.
+- **Related** opens what the card's sessions worked with in one click: pull requests, artifacts, docs (Google, Confluence, Notion, Figma, Miro) and Slack conversations. The newest few are also on the card in the board. A link counts when you wrote it, Claude showed it to you, or a tool posted or created it; links in search results and command output do not.
 
 Further down the card:
 
@@ -237,7 +238,7 @@ taskboard uninstall --purge  # also deletes the board and the diary
 ## Development
 
 ```bash
-npm test                     # 39 tests, against fake Claude folders in a temp directory
+npm test                     # 47 tests, against fake Claude folders in a temp directory
 ```
 
 ```bash
