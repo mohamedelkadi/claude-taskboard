@@ -3,19 +3,30 @@
 // artifacts and Slack conversations, so a card can open them in one click.
 //
 // A transcript mentions far more links than a session actually used, so only
-// three places count: what the user wrote, what Claude told the user, and the
-// result of a tool that posted or created something. Search results, pages read
-// in a browser, command output and subagents do not. Only known link shapes on
-// known hosts are kept, rebuilt from their parts, so a token in a query string
-// never reaches the board and a look-alike host never becomes a link on a card.
+// four things count: what the user wrote, what Claude told the user, the result
+// of a tool that posted or created something, and a Slack conversation a session
+// read. Search results, pages read in a browser, command output and subagents do
+// not. Only known link shapes on known hosts are kept, rebuilt from their parts,
+// so a token in a query string never reaches the board and a look-alike host
+// never becomes a link on a card.
+//
+// Slack's read tools name a channel and a timestamp but no workspace, and a person
+// can be in several. The workspace comes from a real permalink to that channel, or
+// else from the workspace the connector that did the read clearly belongs to. When
+// neither says, the conversation gets no link rather than one that may not open.
 
 // Raise this when what is collected changes: transcripts are then read once more.
-const VERSION = 1;
+const VERSION = 2;
 const MAX_KEPT = 40;
 const MAX_LINE = 1 << 20;
+const MAX_CHANNELS = 200;
 
 const WRITE_TOOL = /(?:^|__)(slack_send_message|slack_send_message_draft|slack_schedule_message|slack_create_canvas|createConfluencePage|updateConfluencePage|create_file|batch|create)$/;
-const TOOL_NAMES = ['slack_send_message', 'slack_schedule_message', 'slack_create_canvas', 'ConfluencePage', 'create_file', '__batch', '__create'].map((s) => Buffer.from(s));
+const SLACK_TOOL = /^(mcp__.+?)__slack_(\w+)$/;
+const SLACK_HOME = /https:\/\/([a-z0-9-]+)\.slack\.com\/archives\/([A-Z0-9]+)/g;
+const FAILED_RESULT = /^\s*\{\s*"(?:ok"\s*:\s*false|error")/;
+const TOOL_NAMES = ['slack_', 'ConfluencePage', 'create_file', '__batch', '__create'].map((s) => Buffer.from(s));
+const TOOL_RESULT = Buffer.from('"tool_result"');
 const HOST_HINTS = ['/pull/', 'slack.com/', 'docs.google.com/', 'drive.google.com/', 'atlassian.net/wiki', 'notion.so/', 'notion.site/', 'figma.com/', 'miro.com/', '/artifact'].map((s) => Buffer.from(s));
 const HTTPS = Buffer.from('https://');
 const TOOL_USE = Buffer.from('"tool_use"');
@@ -140,7 +151,7 @@ function cleanLabel(text) {
 }
 
 /** Add one, or freshen the one already there. A real name beats a generic one. */
-function keep(list, item, at) {
+function keep(list, item, at, cap = MAX_KEPT) {
   const had = list.find((x) => x.key === item.key);
   if (had) {
     if (at > had.at) had.at = at;
@@ -151,9 +162,9 @@ function keep(list, item, at) {
     return;
   }
   list.push({ key: item.key, kind: item.kind, url: item.url, label: item.label, named: !!item.named, at });
-  if (list.length > MAX_KEPT) {
+  if (list.length > cap) {
     list.sort((a, b) => b.at - a.at);
-    list.length = MAX_KEPT;
+    list.length = cap;
   }
 }
 
@@ -175,14 +186,70 @@ const textOfResult = (content) => {
   return content.map((b) => (b && b.type === 'text' && b.text) || '').join('\n');
 };
 
-const fresh = () => ({ items: [], open: [] });
+const fresh = () => ({ items: [], open: [], reads: [], homes: {}, connectors: {} });
+
+/** Remember a tool call whose result will matter. */
+function noteCall(b, into) {
+  const name = b.name || '';
+  const slack = SLACK_TOOL.exec(name);
+  const write = WRITE_TOOL.test(name);
+  if (!b.id || (!slack && !write) || into.open.some((c) => c.id === b.id)) return;
+  const input = b.input || {};
+  let read = null;
+  if (slack && slack[2] === 'read_thread') read = { channel: input.channel_id, ts: input.message_ts || input.thread_ts };
+  if (slack && slack[2] === 'read_channel') read = { channel: input.channel_id, ts: '' };
+  into.open.push({ id: b.id, write, via: slack ? slack[1] : '', read });
+  if (into.open.length > 20) into.open.shift();
+}
+
+/** A real permalink says which workspace a channel is in, and which one a connector reaches. */
+function learnWorkspaces(text, via, into) {
+  for (const m of text.replace(/\\\//g, '/').matchAll(SLACK_HOME)) {
+    if (m[1] === 'app') continue;
+    const known = into.homes[m[2]];
+    if (known) {
+      if (!known.includes(m[1])) known.push(m[1]);
+    } else if (Object.keys(into.homes).length < MAX_CHANNELS) {
+      into.homes[m[2]] = [m[1]];
+    }
+    const counts = (into.connectors[via] = into.connectors[via] || {});
+    counts[m[1]] = (counts[m[1]] || 0) + 1;
+  }
+}
+
+function noteResult(b, into, at) {
+  const call = into.open.find((c) => c.id === b.tool_use_id);
+  if (!call) return;
+  into.open = into.open.filter((c) => c !== call);
+  if (b.is_error) return;
+  const text = textOfResult(b.content);
+  if (FAILED_RESULT.test(text.slice(0, 200))) return;
+  if (call.write) collect(text, into, at, false);
+  if (!call.via) return;
+  learnWorkspaces(text, call.via, into);
+  const r = call.read;
+  // U… is a person rather than a conversation, and has no link of its own
+  if (!r || !/^[CGD][A-Z0-9]+$/.test(String(r.channel || '')) || (r.ts && !/^\d{10}\.\d{6}$/.test(String(r.ts)))) return;
+  const had = into.reads.find((x) => x.channel === r.channel && x.ts === (r.ts || ''));
+  if (had) {
+    if (at > had.at) had.at = at;
+    return;
+  }
+  into.reads.push({ channel: r.channel, ts: r.ts || '', via: call.via, at });
+  if (into.reads.length > MAX_KEPT) {
+    into.reads.sort((x, y) => y.at - x.at);
+    into.reads.length = MAX_KEPT;
+  }
+}
 
 /** Take what counts from one transcript line. Most lines are ruled out without decoding them. */
 function readLine(buf, into) {
   if (buf.length < 30 || buf.length > MAX_LINE) return;
   if (buf.subarray(0, 48).includes(API_REQUEST)) return;
   const toolCall = buf.includes(TOOL_USE) && TOOL_NAMES.some((n) => buf.includes(n));
-  if (!toolCall && !(buf.includes(HTTPS) && HOST_HINTS.some((n) => buf.includes(n)))) return;
+  // the result of a Slack read has no link in it, so it is known by its call's id
+  const awaited = into.open.length > 0 && buf.includes(TOOL_RESULT) && into.open.some((c) => buf.includes(c.id));
+  if (!toolCall && !awaited && !(buf.includes(HTTPS) && HOST_HINTS.some((n) => buf.includes(n)))) return;
   let o;
   try {
     o = JSON.parse(buf.toString('utf8'));
@@ -195,20 +262,14 @@ function readLine(buf, into) {
   if (o.type === 'assistant' && Array.isArray(content)) {
     for (const b of content) {
       if (b && b.type === 'text') collect(b.text, into, at, false);
-      if (b && b.type === 'tool_use' && b.id && WRITE_TOOL.test(b.name || '') && !into.open.includes(b.id)) {
-        into.open.push(b.id);
-        if (into.open.length > 20) into.open.shift();
-      }
+      if (b && b.type === 'tool_use') noteCall(b, into);
     }
   } else if (o.type === 'user') {
     if (typeof content === 'string') collect(content.replace(INJECTED, ''), into, at, true);
     else if (Array.isArray(content)) {
       for (const b of content) {
         if (b && b.type === 'text') collect(String(b.text || '').replace(INJECTED, ''), into, at, true);
-        if (b && b.type === 'tool_result' && into.open.includes(b.tool_use_id)) {
-          into.open = into.open.filter((id) => id !== b.tool_use_id);
-          if (!b.is_error) collect(textOfResult(b.content), into, at, false);
-        }
+        if (b && b.type === 'tool_result') noteResult(b, into, at);
       }
     }
   }
@@ -216,21 +277,84 @@ function readLine(buf, into) {
 
 const byNewest = (a, b) => b.at - a.at || a.key.localeCompare(b.key);
 
-/** Everything from several lists, one entry per resource, newest first. */
+/**
+ * Everything from several lists, one entry per resource, newest first. The limit is
+ * per transcript: a card with many sessions keeps every link, and folds them on screen.
+ */
 function merge(lists) {
   const out = [];
-  for (const list of lists) for (const r of list || []) keep(out, r, r.at);
+  for (const list of lists) for (const r of list || []) keep(out, r, r.at, Infinity);
   return out.sort(byNewest);
 }
 
 const trackedPr = (pr) => `pr:${String(pr.repo || '').toLowerCase()}#${pr.number}`;
 
+/** Which workspace a channel is in, from everything the board has read. */
+function slackDirectory(details) {
+  const homes = new Map();
+  const tallies = new Map();
+  const home = (channel, workspace) => {
+    if (!homes.has(channel)) homes.set(channel, new Set());
+    homes.get(channel).add(workspace);
+  };
+  for (const d of details) {
+    const links = d && d.links;
+    if (!links) continue;
+    for (const r of links.items || []) {
+      const m = r.kind === 'slack' && /^slack:([a-z0-9-]+)\/([A-Z0-9]+)/.exec(r.key);
+      if (m) home(m[2], m[1]);
+    }
+    for (const [channel, list] of Object.entries(links.homes || {})) for (const w of list) home(channel, w);
+    for (const [via, counts] of Object.entries(links.connectors || {})) {
+      if (!tallies.has(via)) tallies.set(via, new Map());
+      const tally = tallies.get(via);
+      for (const [w, n] of Object.entries(counts)) tally.set(w, (tally.get(w) || 0) + n);
+    }
+  }
+  // Messages quote links from other workspaces, so a connector's own is the one that clearly dominates.
+  const usual = new Map();
+  for (const [via, tally] of tallies) {
+    const total = [...tally.values()].reduce((a, b) => a + b, 0);
+    const [top, n] = [...tally.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (n / total >= 0.8) usual.set(via, top);
+  }
+  return {
+    workspaceFor(channel, via) {
+      const known = homes.get(channel);
+      const own = usual.get(via) || '';
+      if (known && known.size === 1) return [...known][0];
+      if (known) return known.has(own) ? own : '';
+      return own;
+    },
+  };
+}
+
+/** Links for the Slack conversations a session read, where the workspace is known. */
+function slackReads(details, directory, have) {
+  const reads = details.flatMap((d) => (d && d.links && d.links.reads) || []);
+  const out = [];
+  const keys = new Set(have.map((r) => r.key));
+  // threads first, so a channel is only offered when nothing more exact is
+  for (const r of reads.slice().sort((a, b) => Number(!a.ts) - Number(!b.ts))) {
+    const workspace = directory.workspaceFor(r.channel, r.via);
+    if (!workspace) continue;
+    const base = `https://${workspace}.slack.com/archives/${r.channel}`;
+    const found = classify(r.ts ? `${base}/p${r.ts.replace('.', '')}` : base);
+    if (!found) continue;
+    if (!r.ts && [...keys].some((k) => k.startsWith(`${found.key}/`))) continue;
+    const label = r.ts ? `Thread · ${slackDay(r.ts)}` : r.channel.startsWith('D') ? 'Direct message' : found.label;
+    out.push({ ...found, label, named: false, at: r.at });
+    keys.add(found.key);
+  }
+  return out;
+}
+
 /**
- * A session's resources: those in its transcripts (a resumed session has several)
- * and the pages Claude recorded it publishing. PRs the app already tracks are left
- * out, since they are shown with their state.
+ * A session's resources: those in its transcripts (a resumed session has several),
+ * the Slack conversations it read, and the pages Claude recorded it publishing.
+ * PRs the app already tracks are left out, since they are shown with their state.
  */
-function forSession(session, details) {
+function forSession(session, details, directory = slackDirectory(details)) {
   const artifacts = [];
   for (const a of session.artifacts || []) {
     const known = classify(a.url);
@@ -239,7 +363,9 @@ function forSession(session, details) {
     artifacts.push({ ...base, label: a.title || base.label, named: !!a.title, at: session.lastActivityAt || 0 });
   }
   const tracked = new Set((session.prs || []).map(trackedPr));
-  return merge([artifacts, ...details.map((d) => d && d.links && d.links.items)]).filter((r) => !tracked.has(r.key));
+  // a link someone actually shared wins over one built for the same conversation
+  const shared = merge([artifacts, ...details.map((d) => d && d.links && d.links.items)]);
+  return merge([shared, slackReads(details, directory, shared)]).filter((r) => !tracked.has(r.key));
 }
 
-module.exports = { VERSION, fresh, readLine, classify, merge, forSession, trackedPr };
+module.exports = { VERSION, fresh, readLine, classify, merge, forSession, slackDirectory, trackedPr };

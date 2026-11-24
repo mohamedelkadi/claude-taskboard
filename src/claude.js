@@ -612,6 +612,7 @@ function scan() {
   }
 
   const byId = new Map(sessions.map((s) => [s.id, s]));
+  const slack = resources.slackDirectory(sessions.flatMap((s) => [s.cliId, ...(s.priorCliIds || [])]).map(cachedDetail));
   for (const s of sessions) {
     const l = live[s.id] || (s.cliId && live[s.cliId]) || null;
     s.live = l ? l.status : '';
@@ -635,7 +636,7 @@ function scan() {
       s.steps = null;
       s.cost = 0;
     }
-    s.resources = resources.forSession(s, [d, ...(s.priorCliIds || []).map(cachedDetail)]);
+    s.resources = resources.forSession(s, [d, ...(s.priorCliIds || []).map(cachedDetail)], slack);
   }
   return { sessions, groups, scannedAt: Date.now() };
 }
