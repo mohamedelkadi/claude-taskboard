@@ -109,6 +109,8 @@ Further down the card:
 
 ![Needs me: the sessions waiting on an answer, each with its question](docs/screenshots/needs-me.png)
 
+**Focus** shows only what needs a decision now, one at a time, from one project or several. Sessions stopped on a question, a tool approval or a plan come first, then finished turns that asked something in the last 24 hours. A new prompt joins the queue and never replaces the card you are reading. Answer it in Claude: `o` opens the session, `h` marks it handled, and `j` and `k` move between decisions.
+
 ### 5. Find any session
 
 **Sessions** lists all of them, with filters for where they are (unsorted, on a card) and their state. Tick several to link them to a card or to make one card from them.
@@ -191,7 +193,7 @@ taskboard start | stop | restart | status | doctor
 
 ### Shortcuts and theme
 
-`/` search · `n` new card · `1`–`5` switch view · `←` `→` previous and next day in the Diary · `Esc` close. The ◐ button switches between dark and light.
+`/` search · `n` new card · `f` Focus · `1`–`5` switch view · `←` `→` previous and next day in the Diary · `Esc` close. The ◐ button switches between dark and light.
 
 ![The board in the light theme](docs/screenshots/board-light.png)
 
@@ -202,7 +204,7 @@ Reads, never changes:
 - `~/Library/Application Support/Claude/claude-code-sessions/` — the desktop app's record of each session (title, PRs, parent session, status summary, archived)
 - `~/Library/Application Support/Claude/claude_desktop_config.json` — sidebar groups only
 - `~/.claude/projects/*/*.jsonl` — transcripts, for each session's step list, last recap and conversation search
-- `~/.claude/sessions/` — which sessions are running
+- `~/.claude/sessions/` — which sessions are running or stopped on a prompt
 - `~/.claude/history.jsonl` — once, for prompts typed in a terminal in sessions whose transcript Claude had already deleted
 
 Writes:

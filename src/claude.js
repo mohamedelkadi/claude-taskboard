@@ -10,6 +10,7 @@ const fsp = fs.promises;
 const path = require('path');
 const P = require('./paths');
 const resources = require('./resources');
+const focus = require('./focus');
 
 const CACHE_V = 4;
 // the desktop session index has its own version: it changes when a field is added to a session's record
@@ -247,7 +248,7 @@ function readLive() {
     if (!/^\d+\.json$/.test(f)) continue;
     const d = readJSON(path.join(P.LIVE_DIR, f));
     if (!d || !d.pid || !pidAlive(d.pid)) continue;
-    const rec = { pid: d.pid, status: d.status || 'idle', cliId: d.sessionId || null, hostId: d.hostSessionId || null, cwd: d.cwd || '', name: d.name || '' };
+    const rec = { pid: d.pid, status: d.status || 'idle', cliId: d.sessionId || null, hostId: d.hostSessionId || null, cwd: d.cwd || '', name: d.name || '', waitingFor: d.waitingFor || '', statusAt: Number(d.statusUpdatedAt) || 0 };
     if (rec.hostId) live[rec.hostId] = rec;
     if (rec.cliId) live[rec.cliId] = rec;
   }
@@ -563,6 +564,7 @@ async function readTranscript(cliId) {
 // ---------- everything together ----------
 
 function stateOf(s, live) {
+  if (live && live.status === 'waiting') return 'needs_you'; // stopped on a prompt, mid-turn
   if (live && live.status && live.status !== 'idle') return 'running';
   const cat = s.summary && s.summary.category;
   if (cat === 'blocked') return 'needs_you';
@@ -616,6 +618,10 @@ function scan() {
   for (const s of sessions) {
     const l = live[s.id] || (s.cliId && live[s.cliId]) || null;
     s.live = l ? l.status : '';
+    s.waiting = l && l.status === 'waiting' ? focus.readWaiting(transcripts[l.cliId || s.cliId], l) : null;
+    // Every view reads the question from the summary, and "Mark handled" lasts until its
+    // token changes, so a new prompt comes back even after the last one was dismissed.
+    if (s.waiting) s.summary = { detail: '', ...s.summary, category: 'blocked', needsAction: s.waiting.ask, uuid: s.waiting.token };
     s.state = stateOf(s, l);
     s.groupId = assignments[s.id] || null;
     s.hasTranscript = !!(s.cliId && transcripts[s.cliId]);

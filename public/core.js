@@ -3,7 +3,7 @@
 
 const S = {
   data: null,
-  view: 'board', // board | needs | sessions | graph | diary
+  view: 'board', // board | focus | needs | sessions | graph | diary
   q: '',
   project: '',
   cardId: null, // card open in the drawer
@@ -351,6 +351,7 @@ function renderTop() {
       <div class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#d97757"/><rect x="6" y="7" width="5.5" height="18" rx="1.5" fill="#fff"/><rect x="13.25" y="7" width="5.5" height="12" rx="1.5" fill="#fff" opacity=".85"/><rect x="20.5" y="7" width="5.5" height="8" rx="1.5" fill="#fff" opacity=".7"/></svg><span>Taskboard</span></div>
       <nav class="tabs">
         <button class="tab" data-act="view" data-view="board">Board</button>
+        <button class="tab" data-act="view" data-view="focus" title="One decision at a time  (F)">Focus <span class="pill needs" id="n-focus"></span></button>
         <button class="tab" data-act="view" data-view="needs">Needs me <span class="pill needs" id="n-needs"></span></button>
         <button class="tab" data-act="view" data-view="sessions">Sessions <span class="pill" id="n-unsorted" title="Open sessions that are not on a card"></span></button>
         <button class="tab" data-act="view" data-view="graph">Connections</button>
@@ -369,6 +370,7 @@ function renderTop() {
   const needs = $('#n-needs');
   needs.textContent = x.needs.length || '';
   needs.hidden = !x.needs.length;
+  focusPill();
   const uns = $('#n-unsorted');
   uns.textContent = x.unsorted.length || '';
   uns.hidden = !x.unsorted.length;
@@ -390,6 +392,8 @@ function renderMain() {
     dropdown.classList.toggle('paused', searching());
     dropdown.title = searching() ? 'A search looks in every project' : 'Project';
   }
+  if (S.view === 'focus') return swap(main, renderFocus());
+  focusLeave();
   if (S.view === 'needs') return swap(main, renderNeeds());
   if (S.view === 'sessions') return swap(main, renderSessions());
   if (S.view === 'graph') return renderGraph(main);
@@ -423,7 +427,7 @@ function readHash() {
   } else if (m && S.data) {
     const card = S.data.cards.find((c) => c.key.toLowerCase() === m[1].toLowerCase() || c.id === m[1]);
     if (card) S.cardId = card.id;
-  } else if (['needs', 'sessions', 'graph', 'board'].includes(h)) {
+  } else if (['focus', 'needs', 'sessions', 'graph', 'board'].includes(h)) {
     // the Mac app's menus navigate this way
     S.view = h;
     S.cardId = null;

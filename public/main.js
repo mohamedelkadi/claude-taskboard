@@ -97,6 +97,7 @@ document.addEventListener('keydown', (e) => {
   }
 
   if (typing || e.metaKey || e.ctrlKey || e.altKey || M.kind) return;
+  if (focusKey(e)) return e.preventDefault();
   if (e.key === '/') {
     e.preventDefault();
     $('#q').focus();

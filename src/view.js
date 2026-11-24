@@ -8,6 +8,7 @@ const P = require('./paths');
 const store = require('./store');
 const diary = require('./diary');
 const resources = require('./resources');
+const focus = require('./focus');
 
 const SUB_FROM_STATE = { running: 'in_progress', needs_you: 'blocked', review: 'review', done: 'done', idle: 'in_progress' };
 const STATE_LABEL = { running: 'running', needs_you: 'needs you', review: 'ready for review', done: 'done', idle: 'idle' };
@@ -236,6 +237,7 @@ function buildState(board, scanResult) {
     implicit,
     sessions,
     groups: scanResult.groups,
+    focus: focus.build(sessions, routines),
     routines: [...routines.values()].map((r) => ({ id: r.id, title: r.title, runs: r.runs.length, latestId: r.latest.id, cardId: routineCard.get(r.id) || null })),
     paths: { data: P.DATA_DIR, board: P.BOARD_FILE, cards: P.CARDS_DIR },
   };
