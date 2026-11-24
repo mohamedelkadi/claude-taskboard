@@ -100,7 +100,8 @@ Further down the card:
   - all runs of a **scheduled task** show as one sub-task that follows the latest run
 
   A session you take off a card by hand is not added back.
-- **Notes** are where you, and Claude sessions working on the card, leave decisions and where things stand for whoever picks it up next.
+- **Notes** are where you, and Claude sessions working on the card, leave decisions and where things stand for whoever picks it up next. They render Markdown: headings, lists, tasks, quotes, code blocks and tables.
+- **Attachments** are images and files kept on the card, up to 25 MB each. Paste a screenshot or drop a file anywhere on an open card; in a note or the description it also lands where you are typing. Claude sessions get each file's path, so they can open it.
 
 ### 4. See what is waiting on you
 
@@ -208,6 +209,7 @@ Writes:
 
 - `~/.claude/taskboard/board.json` — the board (hourly copies in `backups/`)
 - `~/.claude/taskboard/cards/*.md` and `BOARD.md` — generated copies for Claude to read
+- `~/.claude/taskboard/attachments/` — the images and files kept on cards. Removing one from its card, or deleting the card, deletes the file
 - `~/.claude/taskboard/diary/` — the diary: one file per day in `days/`, and each session's title, project and card in `sessions.json`. Plain JSON; delete a day's file to forget that day
 - `~/.claude/taskboard/cache/` — what it has already read from transcripts, and how far. `cache/search/index.db` is the conversation search index; it is safe to delete and is rebuilt from the transcripts
 - `~/.claude/skills/board/SKILL.md` — the skill

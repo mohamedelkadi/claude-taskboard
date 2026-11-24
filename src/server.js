@@ -13,6 +13,7 @@ const claude = require('./claude');
 const view = require('./view');
 const diary = require('./diary');
 const search = require('./search');
+const attachments = require('./attachments');
 
 const PUBLIC = path.join(__dirname, '..', 'public');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
@@ -226,6 +227,47 @@ function readBody(req) {
   });
 }
 
+/** An upload's bytes, refused as soon as it is known to be too large. */
+function readFileBody(req) {
+  return new Promise((resolve, reject) => {
+    const tooLarge = () => new store.UserError('Files can be up to 25 MB.');
+    if (Number(req.headers['content-length']) > attachments.MAX_BYTES) {
+      req.resume();
+      return reject(tooLarge());
+    }
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > attachments.MAX_BYTES) {
+        reject(tooLarge());
+        req.destroy();
+      } else chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+function serveAttachment(req, res, id) {
+  const att = attachments.find((state || store.load()).cards, id);
+  if (!att) return send(res, 404, 'Not found', 'text/plain');
+  const cache = attachments.cacheHeaders(att);
+  if (req.headers['if-none-match'] === cache.etag) {
+    res.writeHead(304, cache);
+    return res.end();
+  }
+  const file = fs.createReadStream(store.attachmentFile(att));
+  file.on('open', () => {
+    res.writeHead(200, attachments.headers(att));
+    file.pipe(res);
+  });
+  file.on('error', () => {
+    if (res.headersSent) res.destroy();
+    else send(res, 404, 'Not found', 'text/plain');
+  });
+}
+
 function serveStatic(res, urlPath) {
   const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
   const file = path.join(PUBLIC, rel);
@@ -270,6 +312,8 @@ async function handle(req, res) {
       res.writeHead(200, { 'content-type': 'application/json', 'content-disposition': 'attachment; filename="taskboard-board.json"' });
       return res.end(JSON.stringify(store.load(), null, 1));
     }
+    const attachment = /^\/api\/attachments\/(a_[0-9a-f]{8})$/.exec(p);
+    if (attachment) return serveAttachment(req, res, attachment[1]);
     if (p.startsWith('/api/')) return json(res, 404, { ok: false, error: 'Not found.' });
     return serveStatic(res, p);
   }
@@ -278,9 +322,18 @@ async function handle(req, res) {
   // A page on another site cannot send JSON here without a preflight we never answer.
   const origin = req.headers.origin;
   if (origin && !ALLOWED_HOSTS.has(origin.replace(/^https?:\/\//, ''))) return send(res, 403, 'Forbidden', 'text/plain');
-  if (!/^application\/json/.test(req.headers['content-type'] || '')) return send(res, 415, 'JSON only', 'text/plain');
+  // An upload is raw bytes; that type needs a preflight from another site just as JSON does.
+  const upload = p === '/api/attachments';
+  const accepted = upload ? /^application\/octet-stream$/ : /^application\/json/;
+  if (!accepted.test(req.headers['content-type'] || '')) return send(res, 415, upload ? 'Raw bytes only' : 'JSON only', 'text/plain');
 
   try {
+    if (upload) {
+      const data = await readFileBody(req);
+      const att = attachments.add(url.searchParams.get('card'), url.searchParams.get('name'), data);
+      rebuild();
+      return send(res, 200, `{"ok":true,"result":${JSON.stringify(att)},"state":${stateJson}}`);
+    }
     const body = await readBody(req);
     if (p === '/api/op') {
       const result = store.apply(body.name, body.args);

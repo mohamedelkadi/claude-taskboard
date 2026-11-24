@@ -243,7 +243,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         guard let url = action.request.url else { return decisionHandler(.allow) }
         if url.scheme == "about" { return decisionHandler(.allow) }
         let local = (url.host == "127.0.0.1" || url.host == "localhost") && url.port == boardURL.port
-        if local && url.path != "/api/export" { return decisionHandler(.allow) }
+        // a web view has nowhere to put a download, so the browser takes those
+        if local && url.path != "/api/export" && !url.path.hasPrefix("/api/attachments/") { return decisionHandler(.allow) }
         if ["http", "https", "claude", "mailto"].contains(url.scheme ?? "") { NSWorkspace.shared.open(url) }
         decisionHandler(.cancel)
     }
@@ -251,6 +252,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if let url = action.request.url, ["http", "https"].contains(url.scheme ?? "") { NSWorkspace.shared.open(url) }
         return nil
+    }
+
+    // A web view shows no file picker unless the app opens one for it.
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.begin { completionHandler($0 == .OK ? panel.urls : nil) }
     }
 
     // MARK: what is waiting on you

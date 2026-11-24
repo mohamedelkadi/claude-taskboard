@@ -161,39 +161,6 @@ function openButton(s, look) {
 const stateChip = (state) => `<span class="state-chip ${esc(state)}">${esc(STATE_LABEL[state] || state)}</span>`;
 const stateDot = (state) => `<span class="state-dot ${esc(state)}" title="${esc(STATE_LABEL[state] || '')}"></span>`;
 
-/** A small, safe subset of Markdown: paragraphs, bullets, bold, code, links. */
-function md(text) {
-  const inline = (t) =>
-    esc(t)
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-      .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
-  const out = [];
-  let list = null;
-  let para = [];
-  const flush = () => {
-    if (para.length) out.push(`<p>${para.map(inline).join('<br>')}</p>`);
-    para = [];
-    if (list) out.push(`<ul>${list.map((i) => `<li>${inline(i)}</li>`).join('')}</ul>`);
-    list = null;
-  };
-  for (const raw of String(text || '').split('\n')) {
-    const line = raw.trimEnd();
-    const bullet = /^\s*[-*]\s+(.*)$/.exec(line);
-    if (bullet) {
-      if (para.length) flush();
-      (list = list || []).push(bullet[1]);
-    } else if (!line.trim()) flush();
-    else {
-      if (list) flush();
-      para.push(line.replace(/^#{1,4}\s+/, ''));
-    }
-  }
-  flush();
-  return out.join('');
-}
-
 function matches(text) {
   const q = S.q.trim().toLowerCase();
   return !q || text.toLowerCase().includes(q);

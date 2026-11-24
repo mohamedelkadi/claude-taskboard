@@ -26,6 +26,7 @@ module.exports = {
   OVERVIEW_FILE: path.join(DATA_DIR, 'BOARD.md'),
   CACHE_DIR: path.join(DATA_DIR, 'cache'),
   DIARY_DIR: path.join(DATA_DIR, 'diary'),
+  ATTACH_DIR: path.join(DATA_DIR, 'attachments'),
   LOG_FILE: path.join(DATA_DIR, 'server.log'),
   PID_FILE: path.join(DATA_DIR, 'server.pid'),
   // read from Claude (never written)

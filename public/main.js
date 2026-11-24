@@ -27,6 +27,7 @@ document.addEventListener('input', (e) => {
     convoInput();
     return renderMain();
   }
+  if (t.id === 'new-note') noteDrafts.set(S.cardId, t.value);
   if (t.dataset.input && INPUTS[t.dataset.input]) INPUTS[t.dataset.input](t);
   if (t.classList.contains('d-title')) {
     t.style.height = 'auto';
@@ -55,6 +56,7 @@ document.addEventListener('keydown', (e) => {
   const typing = t.matches && t.matches('input, textarea, select');
 
   if (e.key === 'Escape') {
+    if (closeLightbox()) return;
     if (M.kind) return closeModal(null);
     if (t.classList.contains('desc-edit')) {
       S.editDesc = false;
@@ -109,6 +111,51 @@ document.addEventListener('keydown', (e) => {
     setHash();
     render();
   }
+});
+
+// Files come onto the open card by paste or drop. In the note box or the description they
+// are also linked where the cursor is.
+const fileField = (el) => {
+  if (!el || !el.closest) return null;
+  if (el.closest('.desc-edit')) return 'desc';
+  return el.closest('.note-compose') ? 'new-note' : null;
+};
+
+document.addEventListener('paste', (e) => {
+  if (!S.cardId || M.kind || !e.clipboardData) return;
+  const files = [...e.clipboardData.files];
+  if (!files.length) return;
+  const keep = fileField(e.target);
+  if (!keep && e.target.matches && e.target.matches('input, textarea, select')) return;
+  // Word, Excel and web pages put text on the clipboard with a picture of it: that paste is the text
+  if (keep && e.clipboardData.getData('text/plain') && e.clipboardData.getData('text/html')) return;
+  e.preventDefault();
+  attachFiles(files, keep);
+});
+
+const carriesFiles = (e) => !S.drag && e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+const dropElement = (e) => (e.target.nodeType === 1 ? e.target : e.target.parentElement);
+const inDrawer = (e) => {
+  const el = dropElement(e);
+  return !!(S.cardId && !M.kind && el && el.closest('#drawer'));
+};
+const showDropTarget = (on) => $('#drawer').classList.toggle('drop-on', on);
+
+document.addEventListener('dragover', (e) => {
+  if (!carriesFiles(e)) return;
+  e.preventDefault(); // a file let go anywhere else would replace the page with it
+  const over = inDrawer(e);
+  e.dataTransfer.dropEffect = over ? 'copy' : 'none';
+  showDropTarget(over);
+});
+document.addEventListener('dragleave', (e) => {
+  if (!e.relatedTarget) showDropTarget(false);
+});
+document.addEventListener('drop', (e) => {
+  if (!carriesFiles(e)) return;
+  e.preventDefault();
+  showDropTarget(false);
+  if (inDrawer(e)) attachFiles([...e.dataTransfer.files], fileField(dropElement(e)));
 });
 
 window.addEventListener('hashchange', () => {

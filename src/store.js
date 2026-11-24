@@ -68,6 +68,7 @@ function normalize(b) {
     if (!Array.isArray(c.subtasks)) c.subtasks = [];
     if (!Array.isArray(c.links)) c.links = [];
     if (!Array.isArray(c.notes)) c.notes = [];
+    if (!Array.isArray(c.attachments)) c.attachments = [];
     if (!Array.isArray(c.tags)) c.tags = [];
     if (!c.auto || typeof c.auto !== 'object') c.auto = {};
     if (typeof c.order !== 'number') c.order = 0;
@@ -280,6 +281,7 @@ const OPS = {
       subtasks: [],
       links: [],
       notes: [],
+      attachments: [],
       auto: sanitizeAuto(a.auto),
       archived: false,
       statusAt: t,
@@ -523,6 +525,14 @@ const OPS = {
     return { removed: true };
   },
 
+  // Adding one goes through addAttachment, with a file already on disk.
+  'attachment.remove'(b, a) {
+    const card = findCard(b, a.card);
+    card.attachments = card.attachments.filter((f) => f.id !== a.attachment);
+    touch(card);
+    return { removed: true };
+  },
+
   // The diary's note for one day; an empty text removes it.
   'diary.note'(b, a) {
     const day = str(a.day, 10);
@@ -581,11 +591,41 @@ const OPS = {
 function apply(name, args) {
   const op = OPS[name];
   if (!op) throw new UserError(`Unknown operation "${name}".`);
-  return mutate((b) => op(b, args || {}));
+  let dropped = [];
+  const result = mutate((b) => {
+    const before = b.cards.flatMap((c) => c.attachments);
+    const out = op(b, args || {});
+    const kept = new Set(b.cards.flatMap((c) => c.attachments).map((f) => f.id));
+    dropped = before.filter((f) => !kept.has(f.id));
+    return out;
+  });
+  // only once the board no longer points at them
+  for (const f of dropped) {
+    try {
+      fs.rmSync(attachmentFile(f), { force: true });
+    } catch (_) {}
+  }
+  return result;
+}
+
+const MAX_ATTACHMENTS = 100;
+
+/** Where an attachment's bytes are. */
+const attachmentFile = (att) => path.join(P.ATTACH_DIR, path.basename(`${att.id}${att.ext || ''}`));
+
+/** Put a file that is already on disk on a card. Not an operation: a request cannot name a file. */
+function addAttachment(cardRef, att) {
+  return mutate((b) => {
+    const card = findCard(b, cardRef);
+    if (card.attachments.length >= MAX_ATTACHMENTS) throw new UserError(`A card can hold ${MAX_ATTACHMENTS} attachments.`);
+    card.attachments.push(att);
+    touch(card);
+    return att;
+  });
 }
 
 module.exports = {
   SUB_STATUSES, PRIORITIES, LINK_TYPES, DEFAULT_COLUMNS, DEFAULT_SETTINGS,
   UserError, OPS, apply, mutate, load, save, exists, emptyBoard, normalize,
-  findCard, findColumn, findSubtask, cardOfSession,
+  findCard, findColumn, findSubtask, cardOfSession, attachmentFile, addAttachment,
 };
