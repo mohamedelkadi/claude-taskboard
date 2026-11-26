@@ -383,6 +383,8 @@ const OPS = {
     const card = findCard(b, a.card);
     const sub = findSubtask(card, a.subtask);
     card.subtasks = card.subtasks.filter((s) => s.id !== sub.id);
+    // sessions started from a checklist item stay on the card, on their own
+    for (const s of card.subtasks) if (s.forSub === sub.id) delete s.forSub;
     // Removing a linked session by hand means "not this card": do not auto-link it again.
     if (sub.sessionId) b.sessionMeta[sub.sessionId] = { ...(b.sessionMeta[sub.sessionId] || {}), noAuto: true };
     if (sub.routineId && card.auto.routineIds) {
@@ -408,6 +410,9 @@ const OPS = {
     const card = findCard(b, a.card);
     const ids = [...new Set((Array.isArray(a.sessionIds) ? a.sessionIds : [a.sessionId]).filter(Boolean).map(String))];
     if (!ids.length) throw new UserError('Which session?');
+    // `subtask`: the checklist item the session works on; it is shown under that item
+    const parent = a.subtask ? findSubtask(card, a.subtask) : null;
+    if (parent && (parent.sessionId || parent.routineId)) throw new UserError('A session can only go under a checklist item, not under another session.');
     const t = now();
     for (const sid of ids) {
       for (const c of b.cards) {
@@ -416,8 +421,11 @@ const OPS = {
         c.subtasks = c.subtasks.filter((s) => s.sessionId !== sid);
         if (c.subtasks.length !== before) touch(c);
       }
-      if (!card.subtasks.some((s) => s.sessionId === sid)) {
-        card.subtasks.push({ id: 's_' + rid(), title: '', status: 'auto', sessionId: sid, via: a.via || 'manual', createdAt: t });
+      let row = card.subtasks.find((s) => s.sessionId === sid);
+      if (!row) card.subtasks.push((row = { id: 's_' + rid(), title: '', status: 'auto', sessionId: sid, via: a.via || 'manual', createdAt: t }));
+      if (parent) {
+        row.forSub = parent.id;
+        if (parent.status === 'todo') parent.status = 'in_progress'; // a session is working on it now
       }
       const meta = b.sessionMeta[sid];
       if (meta) {

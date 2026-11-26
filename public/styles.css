@@ -288,6 +288,10 @@ textarea.desc-edit { width: 100%; min-height: 140px; resize: vertical; }
 .sub.is-done .sub-title { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--faint); }
 .sub.is-done.linked .sub-title { text-decoration: none; }
 .sub-title-edit { width: 100%; }
+.sub.nested { margin-left: 22px; border-left: 2px solid var(--line); border-radius: 0 8px 8px 0; }
+.sub-sort { flex: none; width: auto; padding: 2px 6px; font-size: 12px; }
+.sub > .sub-start { flex: none; margin-top: 1px; opacity: .55; }
+.sub:hover > .sub-start, .sub > .sub-start:focus-visible { opacity: 1; }
 .sub-meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 11.5px; margin-top: 2px; }
 .sub-needs { margin-top: 5px; padding: 6px 8px; border-radius: 7px; font-size: 12.5px; background: color-mix(in srgb, var(--needs) 12%, transparent); border-left: 3px solid var(--needs); overflow-wrap: anywhere; }
 .sub-detail { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
@@ -322,7 +326,7 @@ textarea.desc-edit { width: 100%; min-height: 140px; resize: vertical; }
 .note-head strong { color: var(--text); font-weight: 600; }
 .note-head .icon-btn { opacity: 0; }
 .note:hover .note-head .icon-btn, .note-head .icon-btn:focus-visible { opacity: 1; }
-@media (hover: none) { .note-head .icon-btn, .att-thumb .att-x { opacity: 1; } }
+@media (hover: none) { .note-head .icon-btn, .att-thumb .att-x, .sub > .sub-start { opacity: 1; } }
 .note-compose { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
 .note-compose:focus-within { border-color: var(--accent); }
 .note-compose textarea { display: block; width: 100%; min-height: 62px; padding: 8px 10px; border: 0; border-radius: 8px 8px 0 0; background: none; color: inherit; font: inherit; resize: vertical; outline: none; }

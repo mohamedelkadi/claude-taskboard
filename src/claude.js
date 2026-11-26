@@ -637,7 +637,12 @@ function scan() {
       if (!s.wrapUp && d.wrap) s.wrapUp = d.wrap.recap;
       // "Start a session" on a card opens Claude with a brief that names the card
       const brief = /^Work on Taskboard card ([A-Za-z][A-Za-z0-9]*-\d+)\b/.exec(d.firstPrompt || '');
-      if (brief) s.briefCard = brief[1].toUpperCase();
+      if (brief) {
+        s.briefCard = brief[1].toUpperCase();
+        // started from one of the card's checklist items
+        const item = /^Work on Taskboard card [A-Za-z0-9-]+, sub-task (s_[0-9a-f]{8})\b/.exec(d.firstPrompt);
+        if (item) s.briefSub = item[1];
+      }
     } else {
       s.steps = null;
       s.cost = 0;

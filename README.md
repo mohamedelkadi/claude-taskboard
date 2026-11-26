@@ -84,6 +84,8 @@ Click a card to see everything about the task in one place.
 - A session that is **waiting on you** shows its question on the card. **Mark handled** clears it until the session asks again.
 - Every session has an **Open in Claude** button, here and wherever else it is listed: the unsorted list, Needs me, Sessions and the Diary. A session that ran in a terminal gets **Copy resume command** instead.
 - **Start a session** opens Claude's new-session page in the folder of the card's **Project**, with a brief for this card in the prompt box (it also copies the brief, in case the page opens empty). The folder is the one earlier sessions of that project ran in; for a project no session has run in yet, you pick the folder in Claude. The new session reads the card and links itself to it.
+- **▶ Start** on a checklist sub-task does the same for that one item: the brief names the item as the job and the card as its context, and the session shows up under the item (which moves to In progress).
+- **Sort** a card's sub-tasks from the menu next to its progress bar: board order, most recent activity, newest or oldest first, needs attention first, or by title. Sessions started from an item stay under it. Claude can ask for the same order with `board_get_card`'s `sort`.
 - **Link sessions…** adds existing sessions to the card.
 - **Related** opens what the card's sessions worked with in one click: pull requests, artifacts, docs (Google, Confluence, Notion, Figma, Miro) and Slack conversations. The newest few are also on the card in the board. A link counts when you wrote it, Claude showed it to you, or a tool posted or created it, and a Slack conversation counts when a session read it; links in search results and command output do not.
 
@@ -165,10 +167,10 @@ Each card is also a file Claude can read: `~/.claude/taskboard/cards/TB-4.md`.
 | Tool | What it does |
 | --- | --- |
 | `board_overview` | The board, and which card this session is on |
-| `board_get_card` | One card in full: sub-tasks, what each session is waiting for, connections, notes |
+| `board_get_card` | One card in full: sub-tasks (in any order, e.g. most recent first), what each session is waiting for, connections, notes |
 | `board_create_card`, `board_update_card` | Create a card; move or edit one |
 | `board_add_subtask`, `board_update_subtask` | Checklist sub-tasks |
-| `board_link_session` | Put this session, or another one, on a card |
+| `board_link_session` | Put this session, or another one, on a card, optionally under one of its checklist sub-tasks |
 | `board_connect_cards` | Connect two cards |
 | `board_add_note` | Leave context for the next session |
 | `board_find_sessions` | Find sessions by title, ticket, PR or state |

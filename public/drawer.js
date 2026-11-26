@@ -51,6 +51,8 @@ function sessionDetailHtml(s) {
 
 // ---------- sub-task rows ----------
 
+const DATE_SORTS = new Set(['recent', 'newest', 'oldest']);
+
 function subRow(card, sub) {
   const x = ix();
   const s = sub.sessionId ? x.sessions.get(sub.sessionId) : null;
@@ -92,15 +94,21 @@ function subRow(card, sub) {
       detail = `<div class="sub-detail">${sessionDetailHtml(s)}
         <div class="row-actions"><button class="btn small ghost" data-act="copy-id" data-session="${esc(s.id)}">Copy session id</button><button class="btn small ghost danger" data-act="sub-remove" data-sub="${esc(sub.id)}">Take off this card</button></div></div>`;
     }
+  } else if (!linked) {
+    // a checklist item: how far its sessions got, and its age when the order is by date
+    const bits = [];
+    if (sub.sessions) bits.push(`<span>${sub.sessions} session${sub.sessions === 1 ? '' : 's'}</span>`, `<span title="${esc(fullDate(sub.lastActivityAt))}">${esc(ago(sub.lastActivityAt))}</span>`);
+    else if (DATE_SORTS.has(S.subSort) && sub.createdAt) bits.push(`<span title="${esc(fullDate(sub.createdAt))}">added ${esc(ago(sub.createdAt))}</span>`);
+    if (bits.length) meta = `<div class="sub-meta">${bits.join('')}</div>`;
   } else if (linked) {
     meta = `<div class="sub-meta"><span>${sub.kind === 'routine' ? 'This scheduled task has no runs on this Mac.' : `The session was deleted from Claude.${sub.known ? ` <button class="fold" data-act="diary-find" data-q="${esc(sub.title)}">See what it did in the Diary</button>` : ''}`}</span></div>`;
   }
 
   const buttons = linked
     ? `${openButton(s, sub.state === 'needs_you' ? 'primary' : '')}<button class="icon-btn" data-act="${s ? 'sub-toggle' : 'sub-remove'}" data-sub="${esc(sub.id)}" title="${s ? 'Details' : 'Remove'}">${s ? (open ? '▴' : '▾') : '✕'}</button>`
-    : `<button class="icon-btn" data-act="sub-remove" data-sub="${esc(sub.id)}" title="Remove">✕</button>`;
+    : `<button class="btn small ghost sub-start" data-act="sub-start" data-sub="${esc(sub.id)}" title="Open a new Claude session for this sub-task, with the card as its context. It shows up under this item.">▶ Start</button><button class="icon-btn" data-act="sub-remove" data-sub="${esc(sub.id)}" title="Remove">✕</button>`;
 
-  return `<div class="sub${sub.status === 'done' ? ' is-done' : ''}${linked ? ' linked' : ''}${open ? ' expanded' : ''}">${select}<div class="sub-main">${title}${meta}${needs}${detail}</div>${buttons}</div>`;
+  return `<div class="sub${sub.status === 'done' ? ' is-done' : ''}${linked ? ' linked' : ''}${open ? ' expanded' : ''}${sub.depth ? ' nested' : ''}">${select}<div class="sub-main">${title}${meta}${needs}${detail}</div>${buttons}</div>`;
 }
 
 // ---------- the panel ----------
@@ -135,9 +143,15 @@ function drawerHtml(card) {
   const v = card.view;
   // A card's sessions stay in sight whatever their state: a session that finished a turn
   // is still the place the work happens. Only ticked-off checklist items fold away.
+  // Sorted the way the user picked; sessions started from an item stay under it, and fold with it.
   const folds = (s) => s.status === 'done' && s.kind === 'manual';
-  const open = v.subs.filter((s) => !folds(s));
-  const done = v.subs.filter(folds);
+  const open = [];
+  const done = [];
+  let into = open;
+  for (const s of SubSort.subTree(v.subs, S.subSort)) {
+    if (!s.depth) into = folds(s) ? done : open;
+    into.push(s);
+  }
   const pct = v.counts.total ? Math.round((v.counts.done / v.counts.total) * 100) : 0;
   const auto = card.auto || {};
 
@@ -182,7 +196,7 @@ function drawerHtml(card) {
       <div class="sec"><div class="sec-head"><h4>Description</h4></div>${desc}</div>
 
       <div class="sec">
-        <div class="sec-head"><h4>Sub-tasks</h4><span class="muted">${v.counts.done}/${v.counts.total}</span>${v.counts.total ? `<div class="bar" style="max-width:160px"><i style="width:${pct}%"></i></div>` : ''}</div>
+        <div class="sec-head"><h4>Sub-tasks</h4><span class="muted">${v.counts.done}/${v.counts.total}</span>${v.counts.total ? `<div class="bar" style="max-width:160px"><i style="width:${pct}%"></i></div>` : ''}${v.subs.length > 1 ? `<span class="grow"></span><select class="field sub-sort" data-change="sub-sort" data-keep="sub-sort" title="Order of the sub-tasks">${Object.entries(SubSort.SORTS).map(([k, l]) => `<option value="${k}"${k === S.subSort ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>` : ''}</div>
         ${open.map((s) => subRow(card, s)).join('')}
         ${!v.subs.length ? '<div class="muted" style="padding:4px 8px">No sub-tasks yet. Add checklist items, or link the Claude sessions doing the work.</div>' : ''}
         ${done.length ? `<button class="fold" data-act="toggle-done-subs">${S.showDoneSubs ? '▾ Hide' : '▸ Show'} ${done.length} done</button>${S.showDoneSubs ? done.map((s) => subRow(card, s)).join('') : ''}` : ''}
@@ -522,18 +536,27 @@ ACTIONS['card-delete'] = async () => {
   const yes = await confirmModal(`Delete ${card.key} “${card.title}”?`, `The card, its checklist and its notes are removed for good.${n ? ` Its ${n} linked session${n === 1 ? '' : 's'} stay in Claude and go back to Unsorted.` : ''}`, 'Delete card');
   if (yes && (await op('card.delete', { card: card.id }))) toast('Card deleted.');
 };
-ACTIONS['start-session'] = async () => {
+CHANGES['sub-sort'] = (el) => {
+  S.subSort = SubSort.SORTS[el.value] ? el.value : 'board';
+  try {
+    localStorage.setItem('tb-sub-sort', S.subSort);
+  } catch (_) {}
+  render();
+};
+ACTIONS['start-session'] = () => startSession();
+ACTIONS['sub-start'] = (el) => startSession(el.dataset.sub);
+async function startSession(subtask) {
   const card = currentCard();
   if (!card) return;
-  const j = await post('/api/new-session', { card: card.key }).catch(() => null);
+  const j = await post('/api/new-session', { card: card.key, subtask }).catch(() => null);
   if (!j || !j.ok) return toast((j && j.error) || 'Could not open the Claude app.', 'error');
   await copyText(j.brief); // so it can be pasted if Claude opens without it
   toast(
     j.folder
-      ? `Claude is opening a new session in ${shortPath(j.folder)} with the brief filled in (it is on your clipboard too). Finish the sentence and send.`
+      ? `Claude is opening a new session in ${shortPath(j.folder)} with the brief filled in (it is on your clipboard too). ${subtask ? 'It asks for this sub-task; add anything else and send.' : 'Finish the sentence and send.'}`
       : `Claude is opening a new session with the brief filled in (it is on your clipboard too). No folder is known for ${card.project ? `“${card.project}”` : 'this card'} yet, so pick the folder in Claude before you send.`
   );
-};
+}
 ACTIONS['copy-brief'] = async () => {
   const card = currentCard();
   if (!card) return;

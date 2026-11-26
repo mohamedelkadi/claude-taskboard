@@ -357,7 +357,10 @@ async function handle(req, res) {
       const card = store.findCard(store.load(), body.card);
       const shown = state && state.cards.find((c) => c.id === card.id);
       const folder = (shown && shown.view.folder) || '';
-      const brief = view.sessionBrief(card, folder);
+      // from a checklist item: the session works on that item, with the card as its context
+      const item = body.subtask ? store.findSubtask(card, body.subtask) : null;
+      if (item && (item.sessionId || item.routineId)) return json(res, 400, { ok: false, error: 'Start a session from a checklist item, not from a session.' });
+      const brief = view.sessionBrief(card, folder, item);
       if (!body.copyOnly) launch(view.newSessionUrl(brief, folder));
       return json(res, 200, { ok: true, brief, folder });
     }

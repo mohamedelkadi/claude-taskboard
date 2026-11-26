@@ -10,6 +10,14 @@ const S = {
   expanded: new Set(), // sub-tasks unfolded in the drawer
   details: new Map(), // session id -> transcript detail
   showDoneSubs: true, // ticked-off checklist items stay in sight until hidden
+  subSort: (() => {
+    try {
+      const v = localStorage.getItem('tb-sub-sort');
+      return v && SubSort.SORTS[v] ? v : 'board';
+    } catch (_) {
+      return 'board';
+    }
+  })(), // order of a card's sub-tasks, kept per browser
   showAuto: false,
   editDesc: false,
   editSub: null,

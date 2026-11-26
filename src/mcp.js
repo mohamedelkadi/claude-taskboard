@@ -9,6 +9,7 @@ const claude = require('./claude');
 const view = require('./view');
 const diary = require('./diary');
 const search = require('./search');
+const { SORTS } = require('../public/subsort');
 
 const PROTOCOLS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
@@ -27,7 +28,13 @@ const TOOLS = [
   {
     name: 'board_get_card',
     description: 'One card in full: description, sub-tasks with the live state of each linked Claude session (what it is waiting for, its steps, PRs, outcome), connections to other cards, and notes. Read this before working on a card.',
-    inputSchema: { type: 'object', properties: { card: CARD } },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        card: CARD,
+        sort: { type: 'string', enum: Object.keys(SORTS), description: 'Order of the sub-tasks: "recent" (last activity first, e.g. to find the latest session), "newest" / "oldest" (by when each was created or started), "attention" (waiting on the user first, then running), "title", or "board" (the order on the board, the default).' },
+      },
+    },
   },
   {
     name: 'board_create_card',
@@ -85,6 +92,7 @@ const TOOLS = [
       properties: {
         card: { type: 'string', description: 'Card key or title. Required unless unlinking.' },
         session_id: { type: 'string', description: 'A session id from board_find_sessions. Default: this session.' },
+        subtask: { type: 'string', description: 'The checklist sub-task (title or id) the session works on: it is shown under that item. A session started from a sub-task is given this in its brief.' },
         unlink: { type: 'boolean', description: 'Take the session off its card instead.' },
       },
     },
@@ -223,7 +231,7 @@ const HANDLERS = {
   board_get_card(a) {
     const snap = snapshot();
     const card = store.findCard({ cards: snap.state.cards }, cardRef(a, snap));
-    return view.cardMarkdown(card, snap.state);
+    return view.cardMarkdown(card, snap.state, a.sort);
   },
 
   board_create_card(a) {
@@ -283,7 +291,7 @@ const HANDLERS = {
       return `"${session.title}" is no longer on a card.`;
     }
     if (!a.card) throw new store.UserError('Which card? Give its key or title.');
-    const card = store.apply('session.link', { card: a.card, sessionIds: [session.id], via: 'claude' });
+    const card = store.apply('session.link', { card: a.card, sessionIds: [session.id], via: 'claude', subtask: a.subtask || undefined });
     return `Linked "${session.title}" to ${card.key}.\n\n${showCard(card.id)}`;
   },
 
