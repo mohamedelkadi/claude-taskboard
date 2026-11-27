@@ -327,3 +327,78 @@ test('a damaged board file is reported, never replaced with an empty board', () 
   assert.equal(fs.readFileSync(P.BOARD_FILE, 'utf8'), '{ not json');
   fs.writeFileSync(P.BOARD_FILE, good);
 });
+
+test('a session started from a checklist item joins the card under that item', async () => {
+  const made = store.apply('card.create', { title: 'Parent task', description: 'The context' });
+  const item = store.apply('subtask.add', { card: made.id, title: 'Sort the sub-tasks' });
+  const brief = view.sessionBrief(store.findCard(store.load(), made.id), '/work/app', item);
+  assert.match(brief, new RegExp(`^Work on Taskboard card ${made.key}, sub-task ${item.id} "Sort the sub-tasks" \\(part of "Parent task"\\)`));
+  assert.match(brief, /Then: Sort the sub-tasks$/);
+  const id = `local_${fx.uuid(8)}`;
+  fx.desktopSession(id, 8, { title: 'Sorting' });
+  fs.writeFileSync(
+    path.join(P.PROJECTS_DIR, '-work-app', `${fx.uuid(108)}.jsonl`),
+    JSON.stringify({ type: 'user', isSidechain: false, cwd: '/work/app', timestamp: new Date().toISOString(), message: { role: 'user', content: brief } }) + '\n'
+  );
+  claude.scan();
+  await claude.scanTranscript(fx.uuid(108));
+  const scan = claude.scan();
+  const s = scan.sessions.find((x) => x.id === id);
+  assert.deepEqual([s.briefCard, s.briefSub], [made.key, item.id]);
+  assert.equal(view.applyAutoLinks(scan), 1);
+  // TB-45: the item itself becomes the session's row; no second sub-task under it
+  let subs = card(state(), 'Parent task').view.subs;
+  assert.equal(subs.length, 1, 'starting an item does not add another sub-task');
+  assert.deepEqual([subs[0].id, subs[0].sessionId, subs[0].kind, subs[0].title, subs[0].auto], [item.id, id, 'session', 'Sort the sub-tasks', true]);
+  assert.equal(subs[0].forSub, undefined);
+  assert.equal(view.applyAutoLinks(claude.scan()), 0, 'settled: nothing left to nest');
+
+  // the session links itself as its brief asks, with or without the item: still one row
+  store.apply('session.link', { card: made.id, sessionIds: [id], via: 'claude', subtask: item.id });
+  store.apply('session.link', { card: made.id, sessionIds: [id], via: 'claude' });
+  assert.equal(card(state(), 'Parent task').view.subs.length, 1);
+
+  // taken off the card: the checklist item is left, in progress
+  store.apply('session.unlink', { sessionIds: [id] });
+  subs = card(state(), 'Parent task').view.subs;
+  assert.deepEqual(subs.map((x) => [x.id, x.kind, x.title, x.status]), [[item.id, 'manual', 'Sort the sub-tasks', 'in_progress']]);
+
+  // linked by the session itself first, without the item: the board still turns the item into it
+  store.apply('session.link', { card: made.id, sessionIds: [id], via: 'claude' });
+  assert.equal(card(state(), 'Parent task').view.subs.length, 2);
+  assert.equal(view.applyAutoLinks(claude.scan()), 1);
+  subs = card(state(), 'Parent task').view.subs;
+  assert.deepEqual(subs.map((x) => [x.id, x.sessionId]), [[item.id, id]]);
+
+  // another session cannot go under a session
+  assert.throws(() => store.apply('session.link', { card: made.id, sessionIds: [fx.ids.other], subtask: item.id }), /checklist item/);
+
+  // a second item with older-style nested rows still shows the session under it
+  const item2 = store.apply('subtask.add', { card: made.id, title: 'Second' });
+  store.mutate((b) => {
+    b.cards.find((c) => c.id === made.id).subtasks.push({ id: 's_legacy01', title: '', status: 'auto', sessionId: fx.ids.other, forSub: item2.id, createdAt: Date.now() });
+  });
+  subs = card(state(), 'Parent task').view.subs;
+  assert.equal(subs.find((x) => x.sessionId === fx.ids.other).forSub, item2.id);
+  store.apply('subtask.remove', { card: made.id, subtask: item2.id });
+  assert.equal(card(state(), 'Parent task').view.subs.find((x) => x.sessionId === fx.ids.other).forSub, undefined);
+});
+
+test('sub-tasks sort by any of their dates, state or title, with sessions under their item', () => {
+  const { subTree } = require('../public/subsort');
+  const subs = [
+    { id: 'a', kind: 'manual', title: 'b item', status: 'todo', createdAt: 1, lastActivityAt: 1 },
+    { id: 'b', kind: 'session', title: 'A session', status: 'done', state: 'done', createdAt: 3, lastActivityAt: 9 },
+    { id: 'c', kind: 'session', title: 'c run', status: 'blocked', state: 'needs_you', createdAt: 2, lastActivityAt: 5, forSub: 'a' },
+    { id: 'd', kind: 'session', title: 'd run', status: 'in_progress', state: 'running', createdAt: 4, lastActivityAt: 7, forSub: 'a' },
+  ];
+  const ids = (sort) => subTree(subs, sort).map((s) => s.id + s.depth).join(' ');
+  assert.equal(ids('board'), 'a0 c1 d1 b0');
+  assert.equal(ids('recent'), 'b0 a0 d1 c1');
+  assert.equal(ids('newest'), 'b0 a0 d1 c1');
+  assert.equal(ids('oldest'), 'a0 c1 d1 b0');
+  assert.equal(ids('attention'), 'a0 c1 d1 b0');
+  assert.equal(ids('title'), 'b0 a0 c1 d1');
+  const md = view.cardMarkdown(card(state(), 'Parent task'), state(), 'recent');
+  assert.match(md, /sorted: most recent activity/);
+});

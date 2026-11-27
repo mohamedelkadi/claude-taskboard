@@ -9,6 +9,8 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const P = require('./paths');
+const resources = require('./resources');
+const focus = require('./focus');
 
 const CACHE_V = 4;
 // the desktop session index has its own version: it changes when a field is added to a session's record
@@ -246,7 +248,7 @@ function readLive() {
     if (!/^\d+\.json$/.test(f)) continue;
     const d = readJSON(path.join(P.LIVE_DIR, f));
     if (!d || !d.pid || !pidAlive(d.pid)) continue;
-    const rec = { pid: d.pid, status: d.status || 'idle', cliId: d.sessionId || null, hostId: d.hostSessionId || null, cwd: d.cwd || '', name: d.name || '' };
+    const rec = { pid: d.pid, status: d.status || 'idle', cliId: d.sessionId || null, hostId: d.hostSessionId || null, cwd: d.cwd || '', name: d.name || '', waitingFor: d.waitingFor || '', statusAt: Number(d.statusUpdatedAt) || 0 };
     if (rec.hostId) live[rec.hostId] = rec;
     if (rec.cliId) live[rec.cliId] = rec;
   }
@@ -460,7 +462,7 @@ function detailIsStale(cliId) {
   if (!d) return true;
   try {
     const st = fs.statSync(file);
-    return st.size !== d.size || st.mtimeMs !== d.mtimeMs;
+    return st.size !== d.size || st.mtimeMs !== d.mtimeMs || d.linksV !== resources.VERSION;
   } catch (_) {
     return false;
   }
@@ -516,7 +518,17 @@ async function readLines(file, from, size, onLine) {
  * append-only and can be hundreds of MB, so this continues from where the
  * previous read stopped and only decodes the few lines that matter.
  */
-async function scanTranscript(cliId) {
+function scanTranscript(cliId) {
+  // one read at a time per transcript: two would both continue from the same place
+  if (reading.has(cliId)) return reading.get(cliId);
+  const run = readTranscript(cliId).finally(() => reading.delete(cliId));
+  reading.set(cliId, run);
+  return run;
+}
+
+const reading = new Map();
+
+async function readTranscript(cliId) {
   const file = indexTranscripts()[cliId];
   if (!file) return cachedDetail(cliId);
   let st;
@@ -526,9 +538,19 @@ async function scanTranscript(cliId) {
     return cachedDetail(cliId);
   }
   let d = cachedDetail(cliId);
-  if (d && d.size === st.size && d.mtimeMs === st.mtimeMs) return d;
+  if (d && d.size === st.size && d.mtimeMs === st.mtimeMs && d.linksV === resources.VERSION) return d;
   if (!d || d.offset > st.size) d = freshDetail();
-  d.offset = await readLines(file, d.offset, st.size, (line) => handleLine(line, d));
+  if (d.linksV !== resources.VERSION) {
+    // read before links were collected: go over the part already read, once
+    const links = resources.fresh();
+    await readLines(file, 0, d.offset, (line) => resources.readLine(line, links));
+    d.links = links;
+    d.linksV = resources.VERSION;
+  }
+  d.offset = await readLines(file, d.offset, st.size, (line) => {
+    handleLine(line, d);
+    resources.readLine(line, d.links);
+  });
   d.size = st.size;
   d.mtimeMs = st.mtimeMs;
   detailMem.set(cliId, d);
@@ -542,6 +564,7 @@ async function scanTranscript(cliId) {
 // ---------- everything together ----------
 
 function stateOf(s, live) {
+  if (live && live.status === 'waiting') return 'needs_you'; // stopped on a prompt, mid-turn
   if (live && live.status && live.status !== 'idle') return 'running';
   const cat = s.summary && s.summary.category;
   if (cat === 'blocked') return 'needs_you';
@@ -591,9 +614,14 @@ function scan() {
   }
 
   const byId = new Map(sessions.map((s) => [s.id, s]));
+  const slack = resources.slackDirectory(sessions.flatMap((s) => [s.cliId, ...(s.priorCliIds || [])]).map(cachedDetail));
   for (const s of sessions) {
     const l = live[s.id] || (s.cliId && live[s.cliId]) || null;
     s.live = l ? l.status : '';
+    s.waiting = l && l.status === 'waiting' ? focus.readWaiting(transcripts[l.cliId || s.cliId], l) : null;
+    // Every view reads the question from the summary, and "Mark handled" lasts until its
+    // token changes, so a new prompt comes back even after the last one was dismissed.
+    if (s.waiting) s.summary = { detail: '', ...s.summary, category: 'blocked', needsAction: s.waiting.ask, uuid: s.waiting.token };
     s.state = stateOf(s, l);
     s.groupId = assignments[s.id] || null;
     s.hasTranscript = !!(s.cliId && transcripts[s.cliId]);
@@ -609,11 +637,17 @@ function scan() {
       if (!s.wrapUp && d.wrap) s.wrapUp = d.wrap.recap;
       // "Start a session" on a card opens Claude with a brief that names the card
       const brief = /^Work on Taskboard card ([A-Za-z][A-Za-z0-9]*-\d+)\b/.exec(d.firstPrompt || '');
-      if (brief) s.briefCard = brief[1].toUpperCase();
+      if (brief) {
+        s.briefCard = brief[1].toUpperCase();
+        // started from one of the card's checklist items
+        const item = /^Work on Taskboard card [A-Za-z0-9-]+, sub-task (s_[0-9a-f]{8})\b/.exec(d.firstPrompt);
+        if (item) s.briefSub = item[1];
+      }
     } else {
       s.steps = null;
       s.cost = 0;
     }
+    s.resources = resources.forSession(s, [d, ...(s.priorCliIds || []).map(cachedDetail)], slack);
   }
   return { sessions, groups, scannedAt: Date.now() };
 }

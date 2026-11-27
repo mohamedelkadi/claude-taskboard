@@ -68,7 +68,10 @@ function normalize(b) {
     if (!Array.isArray(c.subtasks)) c.subtasks = [];
     if (!Array.isArray(c.links)) c.links = [];
     if (!Array.isArray(c.notes)) c.notes = [];
+    if (!Array.isArray(c.attachments)) c.attachments = [];
     if (!Array.isArray(c.tags)) c.tags = [];
+    if (!Array.isArray(c.workflows)) c.workflows = [];
+    if (!Array.isArray(c.runs)) c.runs = [];
     if (!c.auto || typeof c.auto !== 'object') c.auto = {};
     if (typeof c.order !== 'number') c.order = 0;
     // when the card was put in its column: sessions that work after that can move it on
@@ -258,6 +261,24 @@ function sanitizeAuto(a) {
 
 // ---------- operations ----------
 
+/**
+ * Take sessions off a card. A checklist item that turned into a session when it was
+ * started goes back to being that checklist item. Returns how many were taken off.
+ */
+function dropSessions(card, ids) {
+  let n = 0;
+  const next = [];
+  for (const s of card.subtasks) {
+    if (!ids.has(s.sessionId)) next.push(s);
+    else {
+      n++;
+      if (s.fromItem) next.push({ id: s.id, title: s.title, status: 'in_progress', createdAt: s.createdAt });
+    }
+  }
+  card.subtasks = next;
+  return n;
+}
+
 const OPS = {
   'card.create'(b, a) {
     const title = clean(a.title, 200);
@@ -280,6 +301,9 @@ const OPS = {
       subtasks: [],
       links: [],
       notes: [],
+      attachments: [],
+      workflows: [],
+      runs: [],
       auto: sanitizeAuto(a.auto),
       archived: false,
       statusAt: t,
@@ -381,6 +405,8 @@ const OPS = {
     const card = findCard(b, a.card);
     const sub = findSubtask(card, a.subtask);
     card.subtasks = card.subtasks.filter((s) => s.id !== sub.id);
+    // sessions started from a checklist item stay on the card, on their own
+    for (const s of card.subtasks) if (s.forSub === sub.id) delete s.forSub;
     // Removing a linked session by hand means "not this card": do not auto-link it again.
     if (sub.sessionId) b.sessionMeta[sub.sessionId] = { ...(b.sessionMeta[sub.sessionId] || {}), noAuto: true };
     if (sub.routineId && card.auto.routineIds) {
@@ -406,16 +432,28 @@ const OPS = {
     const card = findCard(b, a.card);
     const ids = [...new Set((Array.isArray(a.sessionIds) ? a.sessionIds : [a.sessionId]).filter(Boolean).map(String))];
     if (!ids.length) throw new UserError('Which session?');
+    // `subtask`: the checklist item the session works on. The item itself becomes the
+    // session's row (it keeps its title); only a second session on it is shown under it.
+    let parent = a.subtask ? findSubtask(card, a.subtask) : null;
+    if (parent && parent.sessionId && ids.length === 1 && parent.sessionId === ids[0]) parent = null; // already its row
+    if (parent && (parent.sessionId || parent.routineId)) throw new UserError('A session can only go under a checklist item, not under another session.');
     const t = now();
     for (const sid of ids) {
       for (const c of b.cards) {
         if (c.id === card.id) continue;
-        const before = c.subtasks.length;
-        c.subtasks = c.subtasks.filter((s) => s.sessionId !== sid);
-        if (c.subtasks.length !== before) touch(c);
+        if (dropSessions(c, new Set([sid]))) touch(c);
       }
-      if (!card.subtasks.some((s) => s.sessionId === sid)) {
-        card.subtasks.push({ id: 's_' + rid(), title: '', status: 'auto', sessionId: sid, via: a.via || 'manual', createdAt: t });
+      let row = card.subtasks.find((s) => s.sessionId === sid);
+      if (parent && !parent.sessionId && !card.subtasks.some((s) => s.forSub === parent.id && s.sessionId !== sid)) {
+        // the first session on the item: the item turns into that session, no second row
+        if (row) card.subtasks = card.subtasks.filter((s) => s !== row);
+        Object.assign(parent, { status: 'auto', sessionId: sid, via: a.via || 'manual', fromItem: true });
+        delete parent.forSub;
+        row = null;
+      } else if (!row) card.subtasks.push((row = { id: 's_' + rid(), title: '', status: 'auto', sessionId: sid, via: a.via || 'manual', createdAt: t }));
+      if (row && parent) {
+        row.forSub = parent.id;
+        if (parent.status === 'todo') parent.status = 'in_progress'; // a session is working on it now
       }
       const meta = b.sessionMeta[sid];
       if (meta) {
@@ -432,10 +470,9 @@ const OPS = {
     const ids = new Set((Array.isArray(a.sessionIds) ? a.sessionIds : [a.sessionId]).filter(Boolean).map(String));
     let n = 0;
     for (const c of b.cards) {
-      const before = c.subtasks.length;
-      c.subtasks = c.subtasks.filter((s) => !ids.has(s.sessionId));
-      if (c.subtasks.length !== before) {
-        n += before - c.subtasks.length;
+      const k = dropSessions(c, ids);
+      if (k) {
+        n += k;
         touch(c);
       }
     }
@@ -523,6 +560,14 @@ const OPS = {
     return { removed: true };
   },
 
+  // Adding one goes through addAttachment, with a file already on disk.
+  'attachment.remove'(b, a) {
+    const card = findCard(b, a.card);
+    card.attachments = card.attachments.filter((f) => f.id !== a.attachment);
+    touch(card);
+    return { removed: true };
+  },
+
   // The diary's note for one day; an empty text removes it.
   'diary.note'(b, a) {
     const day = str(a.day, 10);
@@ -581,11 +626,44 @@ const OPS = {
 function apply(name, args) {
   const op = OPS[name];
   if (!op) throw new UserError(`Unknown operation "${name}".`);
-  return mutate((b) => op(b, args || {}));
+  let dropped = [];
+  const result = mutate((b) => {
+    const before = b.cards.flatMap((c) => c.attachments);
+    const out = op(b, args || {});
+    const kept = new Set(b.cards.flatMap((c) => c.attachments).map((f) => f.id));
+    dropped = before.filter((f) => !kept.has(f.id));
+    return out;
+  });
+  // only once the board no longer points at them
+  for (const f of dropped) {
+    try {
+      fs.rmSync(attachmentFile(f), { force: true });
+    } catch (_) {}
+  }
+  return result;
+}
+
+const MAX_ATTACHMENTS = 100;
+
+/** Where an attachment's bytes are. */
+const attachmentFile = (att) => path.join(P.ATTACH_DIR, path.basename(`${att.id}${att.ext || ''}`));
+
+/** Put a file that is already on disk on a card. Not an operation: a request cannot name a file. */
+function addAttachment(cardRef, att) {
+  return mutate((b) => {
+    const card = findCard(b, cardRef);
+    if (card.attachments.length >= MAX_ATTACHMENTS) throw new UserError(`A card can hold ${MAX_ATTACHMENTS} attachments.`);
+    card.attachments.push(att);
+    touch(card);
+    return att;
+  });
 }
 
 module.exports = {
   SUB_STATUSES, PRIORITIES, LINK_TYPES, DEFAULT_COLUMNS, DEFAULT_SETTINGS,
   UserError, OPS, apply, mutate, load, save, exists, emptyBoard, normalize,
-  findCard, findColumn, findSubtask, cardOfSession,
+  findCard, findColumn, findSubtask, cardOfSession, attachmentFile, addAttachment,
 };
+
+// workflows add their own operations (workflow.save, …); loaded last, as it uses the above
+require('./workflows');

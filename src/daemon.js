@@ -61,4 +61,29 @@ async function stop() {
   return { stopped: false, pid: up.pid };
 }
 
-module.exports = { health, start, stop };
+/** POST JSON to the running board (starting it if needed) and return its answer. For what only the server can do, such as running a workflow. */
+async function call(urlPath, body) {
+  await start();
+  const data = JSON.stringify(body || {});
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: P.HOST, port: P.PORT, path: urlPath, method: 'POST', headers: { host: `${P.HOST}:${P.PORT}`, 'content-type': 'application/json', 'content-length': Buffer.byteLength(data) }, timeout: 20000 },
+      (res) => {
+        let text = '';
+        res.on('data', (c) => (text += c));
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(text));
+          } catch (_) {
+            reject(new Error(`The board answered ${res.statusCode}.`));
+          }
+        });
+      }
+    );
+    req.on('timeout', () => req.destroy(new Error('The board did not answer.')));
+    req.on('error', reject);
+    req.end(data);
+  });
+}
+
+module.exports = { health, start, stop, call };

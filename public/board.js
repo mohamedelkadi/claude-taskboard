@@ -15,6 +15,11 @@ function cardFace(card) {
   if (c.running) sig.push(`<span class="sig running">● ${c.running} running</span>`);
   if (c.needs) sig.push(`<span class="sig needs">${c.needs} need${c.needs === 1 ? 's' : ''} you</span>`);
   if (c.review) sig.push(`<span class="sig review">${c.review} to review</span>`);
+  const wfs = v.workflows || [];
+  const wfRunning = wfs.filter((w) => w.running).length;
+  const wfFailed = wfs.filter((w) => !w.running && w.last && ['failed', 'timeout', 'interrupted'].includes(w.last.status)).length;
+  if (wfRunning) sig.push(`<span class="sig running" title="A workflow on this card is running">⚙ ${wfRunning === 1 ? 'workflow' : wfRunning + ' workflows'} running</span>`);
+  if (wfFailed) sig.push(`<span class="sig failed" title="A workflow's last run did not succeed. Open the card to see why.">⚙ ${wfFailed === 1 ? 'workflow' : wfFailed + ' workflows'} failed</span>`);
   const prs = v.prs.slice().sort((a, b) => (a.state === 'OPEN' ? -1 : 1) - (b.state === 'OPEN' ? -1 : 1)).slice(0, 3);
   const saving = S.pending.has(card.id); // dropped here, not yet confirmed by the board
   return `
@@ -27,6 +32,7 @@ function cardFace(card) {
       <h3>${esc(card.title)}</h3>
       ${c.total ? `<div class="progress"><div class="bar"><i style="width:${pct}%"></i></div><span>${c.done}/${c.total}</span></div>` : ''}
       ${sig.length ? `<div class="signals">${sig.join('')}</div>` : ''}
+      ${cardResources(v)}
       <div class="card-foot">
         ${prs.map(prChip).join('')}${v.prs.length > 3 ? `<span class="muted">+${v.prs.length - 3}</span>` : ''}
         ${sessions ? `<span class="muted" title="Claude sessions on this card">${sessions} session${sessions === 1 ? '' : 's'}</span>` : ''}

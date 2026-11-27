@@ -8,6 +8,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const P = require('../src/paths');
 const store = require('../src/store');
+const search = require('../src/search');
 
 let server;
 after(() => {
@@ -117,6 +118,23 @@ test('the diary is served, with its notes, and says when it changed', async () =
   assert.equal(found.json.results.items[0].note, 'From the test');
 });
 
+test('conversation search is served from the index the server keeps', { skip: !search.available() && 'needs node:sqlite' }, async () => {
+  let found = null;
+  for (let i = 0; i < 60 && !(found && found.results.length); i++) {
+    found = (await request('GET', '/api/search?q=ranking')).json;
+    if (!found.results.length) await new Promise((r) => setTimeout(r, 50));
+  }
+  assert.equal(found.ok, true);
+  assert.equal(found.status.available, true);
+  assert.equal(found.results[0].id, fx.ids.root);
+  assert.equal(found.results[0].title, 'PROJ-100 search root');
+  assert.match(found.results[0].hits[0].text, /\u0001ranking\u0002/);
+  const empty = await request('GET', '/api/search?q=');
+  assert.deepEqual(empty.json.results, []);
+  const rebind = await request('GET', '/api/search?q=ranking', { headers: { host: 'evil.example' } });
+  assert.equal(rebind.status, 403);
+});
+
 test('the MCP server lists its tools and changes the board', async () => {
   const mcp = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'mcp.js')], { env: process.env, stdio: ['pipe', 'pipe', 'inherit'] });
   const replies = new Map();
@@ -177,6 +195,13 @@ test('the MCP server lists its tools and changes the board', async () => {
     assert.match(hit.content[0].text, /^1 match for "feature flag" on 1 day/);
     const badDate = await tool('board_diary', { date: 'someday' });
     assert.equal(badDate.isError, true);
+
+    if (search.available()) {
+      const convo = await tool('board_search_conversations', { query: 'ranking' });
+      assert.match(convo.content[0].text, /\*\*PROJ-100 search root\*\*/);
+      assert.match(convo.content[0].text, /You: .*\*\*ranking\*\*/);
+      assert.equal((await tool('board_search_conversations', { query: '  ' })).isError, true);
+    }
 
     const noCard = await tool('board_get_card', {});
     assert.equal(noCard.isError, true);

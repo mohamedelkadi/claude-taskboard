@@ -12,6 +12,9 @@ const store = require('./store');
 const claude = require('./claude');
 const view = require('./view');
 const diary = require('./diary');
+const search = require('./search');
+const attachments = require('./attachments');
+const workflows = require('./workflows');
 
 const PUBLIC = path.join(__dirname, '..', 'public');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
@@ -112,6 +115,7 @@ function rescan() {
     lastError = '';
     crawl();
     diary.crawl(announce).catch((e) => log('diary:', e.message));
+    search.schedule(log);
   } catch (e) {
     lastError = e.message;
     log('scan failed:', e.message);
@@ -129,13 +133,14 @@ async function crawl() {
       .filter((s) => s.cliId && (s.cardId || !s.archived))
       .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
     let read = 0;
-    for (const s of want) {
-      if (!claude.detailIsStale(s.cliId)) continue;
+    // a resumed session's earlier transcripts hold links too
+    for (const cliId of want.flatMap((s) => [s.cliId, ...(s.priorCliIds || [])])) {
+      if (!claude.detailIsStale(cliId)) continue;
       try {
-        await claude.scanTranscript(s.cliId);
+        await claude.scanTranscript(cliId);
         read++;
       } catch (e) {
-        log('transcript', s.cliId, e.message);
+        log('transcript', cliId, e.message);
       }
       if (read && read % 20 === 0) look();
     }
@@ -223,6 +228,47 @@ function readBody(req) {
   });
 }
 
+/** An upload's bytes, refused as soon as it is known to be too large. */
+function readFileBody(req) {
+  return new Promise((resolve, reject) => {
+    const tooLarge = () => new store.UserError('Files can be up to 25 MB.');
+    if (Number(req.headers['content-length']) > attachments.MAX_BYTES) {
+      req.resume();
+      return reject(tooLarge());
+    }
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > attachments.MAX_BYTES) {
+        reject(tooLarge());
+        req.destroy();
+      } else chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+function serveAttachment(req, res, id) {
+  const att = attachments.find((state || store.load()).cards, id);
+  if (!att) return send(res, 404, 'Not found', 'text/plain');
+  const cache = attachments.cacheHeaders(att);
+  if (req.headers['if-none-match'] === cache.etag) {
+    res.writeHead(304, cache);
+    return res.end();
+  }
+  const file = fs.createReadStream(store.attachmentFile(att));
+  file.on('open', () => {
+    res.writeHead(200, attachments.headers(att));
+    file.pipe(res);
+  });
+  file.on('error', () => {
+    if (res.headersSent) res.destroy();
+    else send(res, 404, 'Not found', 'text/plain');
+  });
+}
+
 function serveStatic(res, urlPath) {
   const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
   const file = path.join(PUBLIC, rel);
@@ -259,10 +305,23 @@ async function handle(req, res) {
       const arg = (name, max) => (url.searchParams.get(name) || '').slice(0, max);
       return json(res, 200, diary.page({ day: arg('day', 10), q: arg('q', 200), project: arg('project', 200) }, state));
     }
+    if (p === '/api/search') {
+      if (!state) return json(res, 503, { ok: false, error: 'The board is still starting.' });
+      return json(res, 200, search.page({ q: (url.searchParams.get('q') || '').slice(0, 300), limit: 12 }, state));
+    }
     if (p === '/api/export') {
       res.writeHead(200, { 'content-type': 'application/json', 'content-disposition': 'attachment; filename="taskboard-board.json"' });
       return res.end(JSON.stringify(store.load(), null, 1));
     }
+    if (p === '/api/workflow/check') return json(res, 200, { ok: true, ...(await workflows.check()) });
+    if (p === '/api/workflow/log') {
+      const runId = url.searchParams.get('run') || '';
+      const card = (state ? state.cards : []).find((c) => (c.runs || []).some((r) => r.id === runId));
+      if (!card) return json(res, 404, { ok: false, error: 'That run is gone.' });
+      return json(res, 200, { ok: true, run: card.runs.find((r) => r.id === runId), events: workflows.readLog(runId) });
+    }
+    const attachment = /^\/api\/attachments\/(a_[0-9a-f]{8})$/.exec(p);
+    if (attachment) return serveAttachment(req, res, attachment[1]);
     if (p.startsWith('/api/')) return json(res, 404, { ok: false, error: 'Not found.' });
     return serveStatic(res, p);
   }
@@ -271,9 +330,18 @@ async function handle(req, res) {
   // A page on another site cannot send JSON here without a preflight we never answer.
   const origin = req.headers.origin;
   if (origin && !ALLOWED_HOSTS.has(origin.replace(/^https?:\/\//, ''))) return send(res, 403, 'Forbidden', 'text/plain');
-  if (!/^application\/json/.test(req.headers['content-type'] || '')) return send(res, 415, 'JSON only', 'text/plain');
+  // An upload is raw bytes; that type needs a preflight from another site just as JSON does.
+  const upload = p === '/api/attachments';
+  const accepted = upload ? /^application\/octet-stream$/ : /^application\/json/;
+  if (!accepted.test(req.headers['content-type'] || '')) return send(res, 415, upload ? 'Raw bytes only' : 'JSON only', 'text/plain');
 
   try {
+    if (upload) {
+      const data = await readFileBody(req);
+      const att = attachments.add(url.searchParams.get('card'), url.searchParams.get('name'), data);
+      rebuild();
+      return send(res, 200, `{"ok":true,"result":${JSON.stringify(att)},"state":${stateJson}}`);
+    }
     const body = await readBody(req);
     if (p === '/api/op') {
       const result = store.apply(body.name, body.args);
@@ -297,9 +365,24 @@ async function handle(req, res) {
       const card = store.findCard(store.load(), body.card);
       const shown = state && state.cards.find((c) => c.id === card.id);
       const folder = (shown && shown.view.folder) || '';
-      const brief = view.sessionBrief(card, folder);
+      // from a checklist item: the session works on that item, with the card as its context
+      const item = body.subtask ? store.findSubtask(card, body.subtask) : null;
+      if (item && (item.sessionId || item.routineId)) return json(res, 400, { ok: false, error: 'Start a session from a checklist item, not from a session.' });
+      const brief = view.sessionBrief(card, folder, item);
       if (!body.copyOnly) launch(view.newSessionUrl(brief, folder));
       return json(res, 200, { ok: true, brief, folder });
+    }
+    if (p === '/api/workflow/run') {
+      // the folder the card's sessions use, for a workflow that names none
+      const card = store.findCard(store.load(), body.card);
+      const shown = state && state.cards.find((c) => c.id === card.id);
+      const run = workflows.start(card.id, body.workflow, body.trigger === 'claude' ? 'claude' : 'manual', shown && shown.view.folder);
+      rebuild();
+      return send(res, 200, `{"ok":true,"result":${JSON.stringify(run)},"state":${stateJson}}`);
+    }
+    if (p === '/api/workflow/stop') {
+      if (!workflows.stop(String(body.run || ''), 'manual')) throw new store.UserError('That run is not running any more.');
+      return json(res, 200, { ok: true });
     }
     if (p === '/api/reveal') {
       launch(P.DATA_DIR);
@@ -333,7 +416,21 @@ function main() {
   server.listen(P.PORT, P.HOST, () => {
     fs.writeFileSync(P.PID_FILE, String(process.pid));
     log(`taskboard listening on ${P.boardUrl()} (pid ${process.pid})`);
+    workflows.setLog(log);
+    try {
+      workflows.settleOrphans(); // runs this server was doing when it last stopped
+    } catch (e) {
+      log('workflows:', e.message);
+    }
     rescan();
+    // workflows whose schedule is due
+    setInterval(() => {
+      try {
+        if (state) workflows.tick(state);
+      } catch (e) {
+        log('workflow schedule:', e.message);
+      }
+    }, 30000).unref();
     watch(P.DESKTOP_SESSIONS_DIR, { recursive: true });
     watch(P.LIVE_DIR, {});
     watch(P.DESKTOP_DIR, {}, (f) => f === path.basename(P.DESKTOP_CONFIG));
@@ -353,6 +450,7 @@ function main() {
     }, 15000).unref();
   });
   const bye = () => {
+    workflows.stopAll();
     try {
       if (fs.readFileSync(P.PID_FILE, 'utf8') === String(process.pid)) fs.unlinkSync(P.PID_FILE);
     } catch (_) {}

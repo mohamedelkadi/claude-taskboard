@@ -13,7 +13,11 @@ It is for people who run many Claude Code sessions on related work and lose trac
 - Keeps a diary of each day's work as short notes, not copies of your sessions: about 12 KB a day.
 - Comes with a Mac app (Dock icon, menu-bar count of sessions waiting on you), a `/board` skill and `board_*` tools for Claude, and a `taskboard` command.
 
-The screenshots here show made-up data from [`scripts/demo.js`](scripts/demo.js).
+**Watch the 90-second demo** (click the picture to play it):
+
+[![A 90-second walkthrough of the board, a card, Focus, Needs me, Sessions, search, Connections and the Diary](docs/demo/taskboard-demo.jpg)](docs/demo/taskboard-demo.mp4)
+
+The screenshots and the demo video here show made-up data from [`scripts/demo.js`](scripts/demo.js).
 
 > This is a personal tool, not an Anthropic product. Built and tested on macOS with the Claude desktop app's Code tab and the Claude Code CLI.
 
@@ -84,7 +88,10 @@ Click a card to see everything about the task in one place.
 - A session that is **waiting on you** shows its question on the card. **Mark handled** clears it until the session asks again.
 - Every session has an **Open in Claude** button, here and wherever else it is listed: the unsorted list, Needs me, Sessions and the Diary. A session that ran in a terminal gets **Copy resume command** instead.
 - **Start a session** opens Claude's new-session page in the folder of the card's **Project**, with a brief for this card in the prompt box (it also copies the brief, in case the page opens empty). The folder is the one earlier sessions of that project ran in; for a project no session has run in yet, you pick the folder in Claude. The new session reads the card and links itself to it.
+- **▶ Start** on a checklist sub-task does the same for that one item: the brief names the item as the job and the card as its context, and the item itself becomes that session's row, keeping its name, its status following the session. Take the session off the card and the item is left as it was, In progress.
+- **Sort** a card's sub-tasks from the menu next to its progress bar: board order, most recent activity, newest or oldest first, needs attention first, or by title. Sessions started from an item stay under it. Claude can ask for the same order with `board_get_card`'s `sort`.
 - **Link sessions…** adds existing sessions to the card.
+- **Related** opens what the card's sessions worked with in one click: pull requests, artifacts, docs (Google, Confluence, Notion, Figma, Miro) and Slack conversations. The newest few are also on the card in the board. A link counts when you wrote it, Claude showed it to you, or a tool posted or created it, and a Slack conversation counts when a session read it; links in search results and command output do not.
 
 Further down the card:
 
@@ -99,7 +106,25 @@ Further down the card:
   - all runs of a **scheduled task** show as one sub-task that follows the latest run
 
   A session you take off a card by hand is not added back.
-- **Notes** are where you, and Claude sessions working on the card, leave decisions and where things stand for whoever picks it up next.
+- **Notes** are where you, and Claude sessions working on the card, leave decisions and where things stand for whoever picks it up next. They render Markdown: headings, lists, tasks, quotes, code blocks and tables.
+- **Attachments** are images and files kept on the card, up to 25 MB each. Paste a screenshot or drop a file anywhere on an open card; in a note or the description it also lands where you are typing. Claude sessions get each file's path, so they can open it.
+
+### Workflows: let Claude do a card's routine work on its own
+
+A **workflow** is a prompt saved on a card that the board runs for you with Claude Code, in the background, whenever you press **▶ Run now** or on a schedule (every few hours, every day, weekdays, or once a week). It runs on the Claude login of this Mac (your subscription), so there is no API key to create or keep anywhere.
+
+- **New workflow** on a card asks for a name, what Claude should do (or start from an example: a morning summary, running the tests, checking a pull request, running a saved Claude workflow), the folder it works in (by default the one the card's sessions use), and what it may do:
+  - **Read and report** reads files and runs only the commands your Claude settings already allow. The safe place to start.
+  - **Edit files** also creates and changes files in its folder.
+  - **Anything** runs any command without asking, and has to be confirmed in so many words.
+- Nobody is there to answer while it runs, so what would need an approval is skipped. The run's log marks each skipped action, and the card counts them, so you can see when a workflow needs more room.
+- While it runs, the card shows what it is doing and for how long; **Watch** opens its log as it streams, and **Stop** ends it. The board card shows ⚙ while one runs, and when one failed.
+- When it finishes, its report is added to the card's notes (you can turn that off), where the card's next sessions read it. Each workflow keeps its last 10 runs, each with its log and a **Continue in terminal** command that resumes that run's session.
+- If Claude's login has expired, the run says so and how to log in again. The editor shows the login and how long it lasts: using Claude does not extend it, so log in again before it runs out if you rely on schedules.
+- The **Workflows** tab at the top lists every card's workflows in one place: what is running now, what failed last time, what runs next in order, and those you run by hand. Its pill counts the running ones (or, in red, the failed ones). **New workflow** there asks which card it belongs to.
+- Scheduled runs happen while the Mac is awake and the board is running. A time missed while the Mac slept runs once when it wakes. At most three workflows run at a time, each within its time limit (30 minutes unless you pick another).
+
+Claude sessions can start a workflow with `board_run_workflow`, and a terminal with `taskboard run TB-3 "Morning summary"`.
 
 ### 4. See what is waiting on you
 
@@ -107,11 +132,21 @@ Further down the card:
 
 ![Needs me: the sessions waiting on an answer, each with its question](docs/screenshots/needs-me.png)
 
+**Focus** shows only what needs a decision now, one at a time, from one project or several. Sessions stopped on a question, a tool approval or a plan come first, then finished turns that asked something in the last two hours, newest first. A new prompt joins the queue and never replaces the card you are reading. Answer it in Claude: `o` opens the session, `h` marks it handled, and `j` and `k` move between decisions.
+
 ### 5. Find any session
 
 **Sessions** lists all of them, with filters for where they are (unsorted, on a card) and their state. Tick several to link them to a card or to make one card from them.
 
 ![Sessions: every session with its state, project, card and pull requests](docs/screenshots/sessions.png)
+
+**When you remember what a session was about but not what it was called**, type it in the search box (`/`). A panel under the box lists the sessions whose conversation best matches, with the passages that matched and an **Open in Claude** button. `↑` `↓` move through them, `Enter` opens one and `Esc` closes the panel.
+
+- It looks at what you asked, what Claude replied, and the commands and file paths used. Tool output and subagents are left out.
+- Any word can match, and rarer words count for more. A "quoted phrase" has to appear as written.
+- A misspelled word is also tried corrected, and the panel says so (`digram` also searches for **diagram**).
+- Paste a pull request or ticket link, or type a key like `SHOP-212`, to find the session behind it.
+- Likely passwords, tokens and keys are removed before anything is stored, and a session's text leaves the index when Claude deletes its transcript. The index is about 70 MB for 3.7 GB of transcripts, and a first build takes about 10 seconds in the background.
 
 ### 6. See how tasks connect
 
@@ -142,6 +177,7 @@ Every Claude Code session (desktop app and terminal) gets the `board` skill and 
 - "move TB-4 to review" · "TB-4 is blocked by the SDK upgrade card"
 - "add a note to the card with where we got to"
 - "what did I do yesterday" · "write my standup from the diary" · "when did I fix the export"
+- "find the session where we talked about the coupon rollback"
 
 `/board` opens the board beside the chat. The page fits the narrow pane:
 
@@ -152,15 +188,17 @@ Each card is also a file Claude can read: `~/.claude/taskboard/cards/TB-4.md`.
 | Tool | What it does |
 | --- | --- |
 | `board_overview` | The board, and which card this session is on |
-| `board_get_card` | One card in full: sub-tasks, what each session is waiting for, connections, notes |
+| `board_get_card` | One card in full: sub-tasks (in any order, e.g. most recent first), what each session is waiting for, connections, notes |
 | `board_create_card`, `board_update_card` | Create a card; move or edit one |
 | `board_add_subtask`, `board_update_subtask` | Checklist sub-tasks |
-| `board_link_session` | Put this session, or another one, on a card |
+| `board_link_session` | Put this session, or another one, on a card, optionally under one of its checklist sub-tasks |
 | `board_connect_cards` | Connect two cards |
 | `board_add_note` | Leave context for the next session |
 | `board_find_sessions` | Find sessions by title, ticket, PR or state |
+| `board_search_conversations` | Search inside every session, for one you remember but cannot name |
 | `board_diary` | What you did on a day or over a span of days, or a search across every day |
 | `board_diary_note` | Add a line to your own note for a day |
+| `board_run_workflow` | Run one of a card's workflows now |
 
 ### 9. Use it from the terminal
 
@@ -169,8 +207,9 @@ taskboard ls [--all]            taskboard show TB-3
 taskboard add "<title>" [--status "In progress"] [--ticket PROJ-1]
 taskboard move TB-3 "In review" taskboard sub TB-3 "<title>"
 taskboard note TB-3 "<text>"    taskboard link TB-3 [session-id]
-taskboard connect TB-3 TB-7 blocks
+taskboard connect TB-3 TB-7 blocks  taskboard run TB-3 [workflow]
 taskboard sessions [query] [--unsorted]
+taskboard search "<words>" [--project name] [--limit 10]
 taskboard diary [today|yesterday|YYYY-MM-DD] [--days 7] [--project name]
 taskboard diary --search "<words>"
 taskboard start | stop | restart | status | doctor
@@ -178,7 +217,7 @@ taskboard start | stop | restart | status | doctor
 
 ### Shortcuts and theme
 
-`/` search · `n` new card · `1`–`5` switch view · `←` `→` previous and next day in the Diary · `Esc` close. The ◐ button switches between dark and light.
+`/` search · `n` new card · `f` Focus · `1`–`5` switch view · `←` `→` previous and next day in the Diary · `Esc` close. The ◐ button switches between dark and light.
 
 ![The board in the light theme](docs/screenshots/board-light.png)
 
@@ -188,22 +227,24 @@ Reads, never changes:
 
 - `~/Library/Application Support/Claude/claude-code-sessions/` — the desktop app's record of each session (title, PRs, parent session, status summary, archived)
 - `~/Library/Application Support/Claude/claude_desktop_config.json` — sidebar groups only
-- `~/.claude/projects/*/*.jsonl` — transcripts, for each session's step list and last recap
-- `~/.claude/sessions/` — which sessions are running
+- `~/.claude/projects/*/*.jsonl` — transcripts, for each session's step list, last recap and conversation search
+- `~/.claude/sessions/` — which sessions are running or stopped on a prompt
 - `~/.claude/history.jsonl` — once, for prompts typed in a terminal in sessions whose transcript Claude had already deleted
 
 Writes:
 
 - `~/.claude/taskboard/board.json` — the board (hourly copies in `backups/`)
 - `~/.claude/taskboard/cards/*.md` and `BOARD.md` — generated copies for Claude to read
+- `~/.claude/taskboard/runs/` — what each workflow run streamed, for its log. A workflow keeps its last 10 runs; deleting it deletes them
+- `~/.claude/taskboard/attachments/` — the images and files kept on cards. Removing one from its card, or deleting the card, deletes the file
 - `~/.claude/taskboard/diary/` — the diary: one file per day in `days/`, and each session's title, project and card in `sessions.json`. Plain JSON; delete a day's file to forget that day
-- `~/.claude/taskboard/cache/` — what it has already read from transcripts, and how far
+- `~/.claude/taskboard/cache/` — what it has already read from transcripts, and how far. `cache/search/index.db` is the conversation search index; it is safe to delete and is rebuilt from the transcripts
 - `~/.claude/skills/board/SKILL.md` — the skill
 - `~/.claude.json` — one entry, the `taskboard` MCP server (added with `claude mcp add --scope user`)
 - `~/.local/bin/taskboard` — the command
 - `~/Applications/Taskboard.app` — the Mac app (built on your Mac from `macapp/`, signed for that Mac only)
 
-The web server listens on 127.0.0.1 only and refuses requests from other sites. Nothing is sent anywhere.
+The web server listens on 127.0.0.1 only and refuses requests from other sites. Nothing is sent anywhere, except by the workflows you create: each run is a `claude -p` session, like one you would start yourself, and goes to Anthropic like any Claude session. A run is started without `ANTHROPIC_API_KEY`, even if your shell sets one, so it always uses your Claude login.
 
 ## Update and remove
 
@@ -226,7 +267,7 @@ taskboard uninstall --purge  # also deletes the board and the diary
 ## Development
 
 ```bash
-npm test                     # 30 tests, against fake Claude folders in a temp directory
+npm test                     # 79 tests, against fake Claude folders (and a fake claude command) in a temp directory
 ```
 
 ```bash
@@ -237,7 +278,7 @@ npm run demo                 # the board on made-up data, on port 4781
 npm run screenshots          # retake docs/screenshots from the demo (needs Node 22+ and Chrome)
 ```
 
-No dependencies and no build step. `src/store.js` is the board and its operations; `src/claude.js` reads Claude's files; `src/view.js` joins the two (statuses, detected connections, linking rules, first-run import); `src/diary.js` keeps the diary; `src/server.js`, `src/mcp.js` and `src/cli.js` are the three ways in; `public/` is the page; `macapp/` is the Mac app, a thin window around that page.
+No dependencies and no build step. `src/store.js` is the board and its operations; `src/claude.js` reads Claude's files; `src/view.js` joins the two (statuses, detected connections, linking rules, first-run import); `src/diary.js` keeps the diary; `src/search.js` keeps the conversation index; `src/workflows.js` runs and schedules workflows; `src/server.js`, `src/mcp.js` and `src/cli.js` are the three ways in; `public/` is the page; `macapp/` is the Mac app, a thin window around that page.
 
 ## Limits
 
@@ -246,6 +287,8 @@ No dependencies and no build step. `src/store.js` is the board and its operation
 - The board is told of changes rather than asking for them. It watches its own file and Claude's session folders, transcripts and prompt history, and tells the page the moment something changes: a card moved from a terminal or by a Claude session shows in about a tenth of a second, a session's progress within a second or two. A check every 15 seconds catches anything the watchers miss, such as a session process that died without writing anything. If the page's connection drops (the Mac slept, the window sat hidden) it reconnects and catches up by itself.
 - The diary starts from the transcripts still on disk the first time it runs. For older days it has only what the session records and the terminal's prompt history hold: titles, last reports and prompts.
 - The diary holds the beginning of each prompt and reply in plain text, as Claude's own transcripts do. It stays on your Mac, in the folder above.
+- Searching inside conversations needs Node 22.13 or newer, for its built-in SQLite. On an older Node everything else works and the search panel says why it is off.
+- That search matches words, not meaning, so a description that shares no words with the session can miss it. Removing secrets works from known patterns and can miss an unusual one; the index stays on your Mac, in a folder only you can read.
 - macOS only for now: the desktop app's folder and the Mac app are Mac-specific.
 
 ## License

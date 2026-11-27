@@ -40,12 +40,8 @@ function sessionDetailHtml(s) {
   if (outcome) parts.push(`<div><h5>Outcome</h5>${esc(outcome)}</div>`);
   if (det && det.wrap && det.wrap.ask) parts.push(`<div><h5>It asked</h5>${esc(det.wrap.ask)}</div>`);
   if (det && det.firstPrompt) parts.push(`<div><h5>Started with</h5><div class="quote">${esc(det.firstPrompt)}</div></div>`);
-  if (s.artifacts.length) {
-    parts.push(`<div><h5>Pages it published</h5>${s.artifacts
-      .filter((a) => /^https:\/\//.test(a.url))
-      .map((a) => `<a class="chip" href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title || 'Artifact')}</a>`)
-      .join(' ')}</div>`);
-  }
+  const related = sessionResources(s);
+  if (related) parts.push(related);
   const facts = [s.projectName, s.branch && `branch ${s.branch}`, s.model, `started ${fullDate(s.createdAt)}`, det && det.cost ? `$${det.cost.toFixed(2)}` : '', s.archived ? 'archived in Claude' : ''].filter(Boolean);
   parts.push(`<div class="muted">${facts.map(esc).join(' · ')}</div>`);
   if (!det && entry && entry.loading) parts.unshift('<div class="muted">Reading the session…</div>');
@@ -54,6 +50,8 @@ function sessionDetailHtml(s) {
 }
 
 // ---------- sub-task rows ----------
+
+const DATE_SORTS = new Set(['recent', 'newest', 'oldest']);
 
 function subRow(card, sub) {
   const x = ix();
@@ -96,15 +94,21 @@ function subRow(card, sub) {
       detail = `<div class="sub-detail">${sessionDetailHtml(s)}
         <div class="row-actions"><button class="btn small ghost" data-act="copy-id" data-session="${esc(s.id)}">Copy session id</button><button class="btn small ghost danger" data-act="sub-remove" data-sub="${esc(sub.id)}">Take off this card</button></div></div>`;
     }
+  } else if (!linked) {
+    // a checklist item: how far its sessions got, and its age when the order is by date
+    const bits = [];
+    if (sub.sessions) bits.push(`<span>${sub.sessions} session${sub.sessions === 1 ? '' : 's'}</span>`, `<span title="${esc(fullDate(sub.lastActivityAt))}">${esc(ago(sub.lastActivityAt))}</span>`);
+    else if (DATE_SORTS.has(S.subSort) && sub.createdAt) bits.push(`<span title="${esc(fullDate(sub.createdAt))}">added ${esc(ago(sub.createdAt))}</span>`);
+    if (bits.length) meta = `<div class="sub-meta">${bits.join('')}</div>`;
   } else if (linked) {
     meta = `<div class="sub-meta"><span>${sub.kind === 'routine' ? 'This scheduled task has no runs on this Mac.' : `The session was deleted from Claude.${sub.known ? ` <button class="fold" data-act="diary-find" data-q="${esc(sub.title)}">See what it did in the Diary</button>` : ''}`}</span></div>`;
   }
 
   const buttons = linked
     ? `${openButton(s, sub.state === 'needs_you' ? 'primary' : '')}<button class="icon-btn" data-act="${s ? 'sub-toggle' : 'sub-remove'}" data-sub="${esc(sub.id)}" title="${s ? 'Details' : 'Remove'}">${s ? (open ? '▴' : '▾') : '✕'}</button>`
-    : `<button class="icon-btn" data-act="sub-remove" data-sub="${esc(sub.id)}" title="Remove">✕</button>`;
+    : `<button class="btn small ghost sub-start" data-act="sub-start" data-sub="${esc(sub.id)}" title="Open a new Claude session for this sub-task, with the card as its context. This item becomes that session.">▶ Start</button><button class="icon-btn" data-act="sub-remove" data-sub="${esc(sub.id)}" title="Remove">✕</button>`;
 
-  return `<div class="sub${sub.status === 'done' ? ' is-done' : ''}${linked ? ' linked' : ''}${open ? ' expanded' : ''}">${select}<div class="sub-main">${title}${meta}${needs}${detail}</div>${buttons}</div>`;
+  return `<div class="sub${sub.status === 'done' ? ' is-done' : ''}${linked ? ' linked' : ''}${open ? ' expanded' : ''}${sub.depth ? ' nested' : ''}">${select}<div class="sub-main">${title}${meta}${needs}${detail}</div>${buttons}</div>`;
 }
 
 // ---------- the panel ----------
@@ -139,22 +143,29 @@ function drawerHtml(card) {
   const v = card.view;
   // A card's sessions stay in sight whatever their state: a session that finished a turn
   // is still the place the work happens. Only ticked-off checklist items fold away.
+  // Sorted the way the user picked; sessions started from an item stay under it, and fold with it.
   const folds = (s) => s.status === 'done' && s.kind === 'manual';
-  const open = v.subs.filter((s) => !folds(s));
-  const done = v.subs.filter(folds);
+  const open = [];
+  const done = [];
+  let into = open;
+  for (const s of SubSort.subTree(v.subs, S.subSort)) {
+    if (!s.depth) into = folds(s) ? done : open;
+    into.push(s);
+  }
   const pct = v.counts.total ? Math.round((v.counts.done / v.counts.total) * 100) : 0;
   const auto = card.auto || {};
 
+  const files = { attachment: attachmentLookup(card) };
   const desc = S.editDesc
-    ? `<textarea class="field desc-edit" data-keep="desc" data-commit="card-desc" placeholder="The goal, the context, what done looks like. Markdown works.">${esc(card.description)}</textarea>
+    ? `<textarea class="field desc-edit" data-keep="desc" data-commit="card-desc" placeholder="The goal, the context, what done looks like. Markdown works, and you can paste or drop images and files.">${esc(card.description)}</textarea>
        <div class="help">Saved when you click away. Esc cancels.</div>`
-    : `<div class="desc${card.description.trim() ? '' : ' empty'}" data-act="edit-desc">${card.description.trim() ? md(card.description) : 'Add a description: the goal, the context, what done looks like.'}</div>`;
+    : `<div class="desc prose${card.description.trim() ? '' : ' empty'}" data-act="edit-desc">${card.description.trim() ? md(card.description, files) : 'Add a description: the goal, the context, what done looks like.'}</div>`;
 
   const notes = card.notes
     .slice()
     .reverse()
     .map(
-      (n) => `<div class="note"><div class="note-head"><strong>${esc(n.by === 'me' ? 'You' : n.by)}</strong><span>${esc(fullDate(n.at))}</span><span class="grow"></span><button class="icon-btn" data-act="note-remove" data-note="${esc(n.id)}" title="Delete note">✕</button></div>${md(n.text)}</div>`
+      (n) => `<div class="note"><div class="note-head"><strong>${esc(n.by === 'me' ? 'You' : n.by)}</strong><span>${esc(fullDate(n.at))}</span><span class="grow"></span><button class="icon-btn" data-act="note-remove" data-note="${esc(n.id)}" title="Delete note" aria-label="Delete note">✕</button></div><div class="prose">${md(n.text, files)}</div></div>`
     )
     .join('');
 
@@ -179,12 +190,13 @@ function drawerHtml(card) {
         <label>Due<input class="field" type="date" data-keep="due" data-change="card-due" value="${esc(card.due || '')}"></label>
       </div>
       <datalist id="projects">${x.projects.map((p) => `<option value="${esc(p)}">`).join('')}</datalist>
-      ${card.ticket || v.tickets.length ? `<div class="sub-meta" style="margin-top:6px">${[...new Set([card.ticket, ...v.tickets].filter(Boolean))].map(ticketChip).join('')}${v.prs.map(prChip).join('')}</div>` : v.prs.length ? `<div class="sub-meta" style="margin-top:6px">${v.prs.map(prChip).join('')}</div>` : ''}
+      ${card.ticket || v.tickets.length ? `<div class="sub-meta" style="margin-top:6px">${[...new Set([card.ticket, ...v.tickets].filter(Boolean))].map(ticketChip).join('')}</div>` : ''}
+      ${relatedSection(card)}
 
       <div class="sec"><div class="sec-head"><h4>Description</h4></div>${desc}</div>
 
       <div class="sec">
-        <div class="sec-head"><h4>Sub-tasks</h4><span class="muted">${v.counts.done}/${v.counts.total}</span>${v.counts.total ? `<div class="bar" style="max-width:160px"><i style="width:${pct}%"></i></div>` : ''}</div>
+        <div class="sec-head"><h4>Sub-tasks</h4><span class="muted">${v.counts.done}/${v.counts.total}</span>${v.counts.total ? `<div class="bar" style="max-width:160px"><i style="width:${pct}%"></i></div>` : ''}${v.subs.length > 1 ? `<span class="grow"></span><select class="field sub-sort" data-change="sub-sort" data-keep="sub-sort" title="Order of the sub-tasks">${Object.entries(SubSort.SORTS).map(([k, l]) => `<option value="${k}"${k === S.subSort ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>` : ''}</div>
         ${open.map((s) => subRow(card, s)).join('')}
         ${!v.subs.length ? '<div class="muted" style="padding:4px 8px">No sub-tasks yet. Add checklist items, or link the Claude sessions doing the work.</div>' : ''}
         ${done.length ? `<button class="fold" data-act="toggle-done-subs">${S.showDoneSubs ? '▾ Hide' : '▸ Show'} ${done.length} done</button>${S.showDoneSubs ? done.map((s) => subRow(card, s)).join('') : ''}` : ''}
@@ -193,6 +205,8 @@ function drawerHtml(card) {
           <button class="btn" data-act="link-sessions">Link sessions…</button>
         </div>
       </div>
+
+      ${workflowsSection(card)}
 
       <div class="sec">
         <div class="sec-head"><h4>Connections</h4></div>
@@ -217,9 +231,18 @@ function drawerHtml(card) {
         </div>` : ''}
       </div>
 
+      ${attachmentsSection(card)}
+
       <div class="sec">
         <div class="sec-head"><h4>Notes</h4><span class="muted">${card.notes.length || ''}</span></div>
-        <div class="add-row" style="margin:0 0 8px"><textarea class="field" id="new-note" data-keep="new-note" rows="2" placeholder="A decision, a finding, where this stands. Claude sessions on this card read and add notes too." style="resize:vertical"></textarea><button class="btn" data-act="note-add" style="align-self:flex-end">Add</button></div>
+        <div class="note-compose">
+          <textarea id="new-note" data-keep="new-note" rows="3" aria-label="New note" placeholder="A decision, a finding, where this stands. Claude sessions on this card read and add notes too.">${esc(noteDrafts.get(card.id) || '')}</textarea>
+          <div class="note-tools">
+            <button class="btn small ghost" data-act="note-attach">Attach</button>
+            <span class="hint">Markdown works. Paste or drop images and files.</span>
+            <button class="btn small primary" data-act="note-add" title="Add note (⌘Enter)">Add note</button>
+          </div>
+        </div>
         ${notes}
       </div>
 
@@ -229,6 +252,103 @@ function drawerHtml(card) {
         <span class="grow"></span><span>Created ${esc(fullDate(card.createdAt))}</span>
       </div>
     </div>`;
+}
+
+// ---------- attachments ----------
+
+const MAX_ATTACHMENT = 25 * 1024 * 1024; // the server holds to the same limit
+const noteDrafts = new Map(); // what is typed in each card's note box, which a repaint must not lose
+let filePicker = null; // held on to: a browser may drop an unattached input before it reports back
+
+const attachmentUrl = (f) => `/api/attachments/${encodeURIComponent(f.id)}`;
+const attachmentLookup = (card) => (id) => {
+  const f = card.attachments.find((x) => x.id === id);
+  return f ? { name: f.name, url: attachmentUrl(f), image: !!f.type } : null;
+};
+const attachmentSize = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`);
+
+function attachmentsSection(card) {
+  const images = card.attachments.filter((f) => f.type);
+  const others = card.attachments.filter((f) => !f.type);
+  const remove = (f, cls) => `<button class="icon-btn ${cls}" data-act="att-remove" data-att="${esc(f.id)}" title="Remove ${esc(f.name)}" aria-label="Remove ${esc(f.name)}">✕</button>`;
+  return `
+      <div class="sec">
+        <div class="sec-head"><h4>Attachments</h4><span class="muted">${card.attachments.length || ''}</span><span class="grow"></span><button class="btn small" data-act="att-add">Add files</button></div>
+        ${images.length ? `<div class="att-grid">${images.map((f) => `<div class="att-thumb"><button class="att-open" data-act="att-view" data-att="${esc(f.id)}" title="${esc(f.name)}"><img src="${esc(attachmentUrl(f))}" alt="${esc(f.name)}" loading="lazy"></button>${remove(f, 'att-x')}</div>`).join('')}</div>` : ''}
+        ${others.map((f) => `<div class="att-row"><span class="att-ext">${esc((f.ext || '').slice(1, 5).toUpperCase() || 'FILE')}</span><a class="att-name" href="${esc(attachmentUrl(f))}" download="${esc(f.name)}" title="Download ${esc(f.name)}">${esc(f.name)}</a><span class="att-size">${esc(attachmentSize(f.size))}</span>${remove(f, '')}</div>`).join('')}
+        ${card.attachments.length ? '' : '<div class="att-empty">Drop files here, or paste a screenshot anywhere on this card.</div>'}
+      </div>`;
+}
+
+async function uploadFile(cardId, file) {
+  const stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, '.');
+  // a pasted screenshot arrives with a generic name
+  const name = !file.name || /^image\.\w+$/.test(file.name) ? `Pasted image ${stamp}.${(file.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}` : file.name;
+  try {
+    const res = await fetch(`/api/attachments?card=${encodeURIComponent(cardId)}&name=${encodeURIComponent(name)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: file,
+    });
+    const j = await res.json();
+    if (!j.ok) {
+      toast(`${name}: ${j.error || 'could not be attached.'}`, 'error');
+      return null;
+    }
+    setData(j.state);
+    return j.result;
+  } catch (_) {
+    toast(`${name} could not be attached. Is the board server running?`, 'error');
+    return null;
+  }
+}
+
+/** Put text where the user is typing in that field, or at its end if they have moved on. */
+function insertInto(keep, text) {
+  const ta = document.querySelector(`[data-keep="${CSS.escape(keep)}"]`);
+  if (!ta) return toast('Attached to the card.');
+  const focused = document.activeElement === ta;
+  const from = focused ? ta.selectionStart : ta.value.length;
+  const to = focused ? ta.selectionEnd : ta.value.length;
+  const before = ta.value.slice(0, from);
+  const after = ta.value.slice(to);
+  const lead = before && !before.endsWith('\n') ? '\n' : '';
+  const trail = after && !after.startsWith('\n') ? '\n' : '';
+  ta.value = before + lead + text + trail + after;
+  const caret = (before + lead + text).length;
+  ta.focus({ preventScroll: true });
+  ta.setSelectionRange(caret, caret);
+  if (keep === 'new-note') noteDrafts.set(S.cardId, ta.value);
+}
+
+/** Keep the files on the open card; with a field named, also link them where the user is typing. */
+async function attachFiles(files, keep) {
+  const cardId = S.cardId;
+  if (!cardId) return;
+  const links = [];
+  for (const file of files) {
+    if (file.size > MAX_ATTACHMENT) {
+      toast(`${file.name} is over the 25 MB limit.`, 'error');
+      continue;
+    }
+    const att = await uploadFile(cardId, file);
+    if (att) links.push(`${att.type ? '!' : ''}[${att.name.replace(/[[\]]/g, '')}](attachment:${att.id})`);
+  }
+  if (keep && links.length && S.cardId === cardId) insertInto(keep, links.join('\n'));
+}
+
+function pickFiles(keep) {
+  filePicker = document.createElement('input');
+  filePicker.type = 'file';
+  filePicker.multiple = true;
+  filePicker.addEventListener('change', (e) => attachFiles([...e.target.files], keep));
+  filePicker.click();
+}
+
+function closeLightbox() {
+  const box = $('#lightbox');
+  if (box) box.remove();
+  return !!box;
 }
 
 function renderDrawer() {
@@ -365,8 +485,38 @@ ACTIONS['note-add'] = async () => {
   const ta = $('#new-note');
   const text = ta ? ta.value.trim() : '';
   if (!text) return;
+  const cardId = S.cardId;
   ta.value = '';
-  await cardOp('note.add', { text });
+  noteDrafts.delete(cardId);
+  if (await cardOp('note.add', { text })) return;
+  // it did not save: hand the text back rather than lose it
+  noteDrafts.set(cardId, text);
+  const box = $('#new-note');
+  if (box && S.cardId === cardId && !box.value) box.value = text;
+};
+ACTIONS['note-attach'] = () => pickFiles('new-note');
+ACTIONS['att-add'] = () => pickFiles(null);
+ACTIONS['att-view'] = (el) => {
+  const card = currentCard();
+  const f = card && card.attachments.find((x) => x.id === el.dataset.att);
+  if (!f) return;
+  closeLightbox();
+  const box = document.createElement('div');
+  box.id = 'lightbox';
+  box.setAttribute('role', 'dialog');
+  box.setAttribute('aria-modal', 'true');
+  box.setAttribute('aria-label', f.name);
+  box.innerHTML = `<img src="${esc(attachmentUrl(f))}" alt="${esc(f.name)}"><div class="lb-bar"><span>${esc(f.name)}</span><a class="btn small" href="${esc(attachmentUrl(f))}" download="${esc(f.name)}">Download</a><button class="btn small" data-act="lightbox-close">Close</button></div>`;
+  box.addEventListener('click', (e) => e.target === box && closeLightbox());
+  document.body.append(box);
+  $('[data-act="lightbox-close"]', box).focus();
+};
+ACTIONS['lightbox-close'] = () => closeLightbox();
+ACTIONS['att-remove'] = async (el) => {
+  const card = currentCard();
+  const f = card && card.attachments.find((x) => x.id === el.dataset.att);
+  if (!f) return;
+  if (await confirmModal(`Remove ${f.name}?`, 'The file is deleted for good. Notes that show it will say it was removed.', 'Remove file')) cardOp('attachment.remove', { attachment: f.id });
 };
 ACTIONS['note-remove'] = async (el) => {
   // a note can hold an afternoon's findings: never gone on one stray click
@@ -388,18 +538,27 @@ ACTIONS['card-delete'] = async () => {
   const yes = await confirmModal(`Delete ${card.key} “${card.title}”?`, `The card, its checklist and its notes are removed for good.${n ? ` Its ${n} linked session${n === 1 ? '' : 's'} stay in Claude and go back to Unsorted.` : ''}`, 'Delete card');
   if (yes && (await op('card.delete', { card: card.id }))) toast('Card deleted.');
 };
-ACTIONS['start-session'] = async () => {
+CHANGES['sub-sort'] = (el) => {
+  S.subSort = SubSort.SORTS[el.value] ? el.value : 'board';
+  try {
+    localStorage.setItem('tb-sub-sort', S.subSort);
+  } catch (_) {}
+  render();
+};
+ACTIONS['start-session'] = () => startSession();
+ACTIONS['sub-start'] = (el) => startSession(el.dataset.sub);
+async function startSession(subtask) {
   const card = currentCard();
   if (!card) return;
-  const j = await post('/api/new-session', { card: card.key }).catch(() => null);
+  const j = await post('/api/new-session', { card: card.key, subtask }).catch(() => null);
   if (!j || !j.ok) return toast((j && j.error) || 'Could not open the Claude app.', 'error');
   await copyText(j.brief); // so it can be pasted if Claude opens without it
   toast(
     j.folder
-      ? `Claude is opening a new session in ${shortPath(j.folder)} with the brief filled in (it is on your clipboard too). Finish the sentence and send.`
+      ? `Claude is opening a new session in ${shortPath(j.folder)} with the brief filled in (it is on your clipboard too). ${subtask ? 'It asks for this sub-task; add anything else and send.' : 'Finish the sentence and send.'}`
       : `Claude is opening a new session with the brief filled in (it is on your clipboard too). No folder is known for ${card.project ? `“${card.project}”` : 'this card'} yet, so pick the folder in Claude before you send.`
   );
-};
+}
 ACTIONS['copy-brief'] = async () => {
   const card = currentCard();
   if (!card) return;

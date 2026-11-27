@@ -7,6 +7,10 @@ const path = require('path');
 const P = require('./paths');
 const store = require('./store');
 const diary = require('./diary');
+const resources = require('./resources');
+const focus = require('./focus');
+const workflows = require('./workflows');
+const { subTree, SORTS } = require('../public/subsort');
 
 const SUB_FROM_STATE = { running: 'in_progress', needs_you: 'blocked', review: 'review', done: 'done', idle: 'in_progress' };
 const STATE_LABEL = { running: 'running', needs_you: 'needs you', review: 'ready for review', done: 'done', idle: 'idle' };
@@ -43,6 +47,14 @@ function buildRoutines(sessions) {
 }
 
 function effectiveSub(sub, ctx) {
+  const v = baseSub(sub, ctx);
+  v.createdAt = v.createdAt || sub.createdAt || 0;
+  v.lastActivityAt = v.lastActivityAt || sub.createdAt || 0;
+  if (sub.forSub) v.forSub = sub.forSub;
+  return v;
+}
+
+function baseSub(sub, ctx) {
   if (sub.sessionId) {
     const s = ctx.byId.get(sub.sessionId);
     if (!s) {
@@ -53,7 +65,7 @@ function effectiveSub(sub, ctx) {
     return {
       id: sub.id, kind: 'session', sessionId: s.id, auto: sub.status === 'auto', state: s.estate,
       status: sub.status === 'auto' ? SUB_FROM_STATE[s.estate] : sub.status,
-      title: sub.title || s.title, via: sub.via || '',
+      title: sub.title || s.title, via: sub.via || '', createdAt: s.createdAt, lastActivityAt: s.lastActivityAt,
     };
   }
   if (sub.routineId) {
@@ -64,7 +76,7 @@ function effectiveSub(sub, ctx) {
       id: sub.id, kind: 'routine', routineId: r.id, sessionId: s.id, runs: r.runs.length, auto: sub.status === 'auto', state: s.estate,
       // a routine is never "done": a finished run just means it is ticking over
       status: sub.status === 'auto' ? (s.estate === 'needs_you' ? 'blocked' : 'in_progress') : sub.status,
-      title: sub.title || r.title,
+      title: sub.title || r.title, createdAt: r.runs[r.runs.length - 1].createdAt, lastActivityAt: s.lastActivityAt,
     };
   }
   return { id: sub.id, kind: 'manual', status: sub.status, title: sub.title };
@@ -116,6 +128,21 @@ function folderResolver(sessions) {
   };
 }
 
+/** What the card panel shows for each of a card's workflows: its schedule in words, when it runs next, its latest run. */
+function workflowViews(card, folder) {
+  return (card.workflows || []).map((wf) => {
+    const runs = (card.runs || []).filter((r) => r.workflowId === wf.id).sort((a, b) => b.startedAt - a.startedAt);
+    return {
+      id: wf.id,
+      schedule: workflows.describeSchedule(wf.schedule),
+      nextAt: workflows.nextRun(wf),
+      folder: wf.folder || folder || '',
+      running: runs.some((r) => r.status === 'running'),
+      last: runs[0] || null,
+    };
+  });
+}
+
 function buildState(board, scanResult) {
   const meta = board.sessionMeta;
   const sessions = scanResult.sessions;
@@ -125,6 +152,7 @@ function buildState(board, scanResult) {
     s.token = ackToken(s);
     s.cardId = null;
     s.hidden = !!(meta[s.id] && meta[s.id].hidden);
+    s.workflowRun = !!(meta[s.id] && meta[s.id].workflow); // a run of one of a card's workflows
   }
   const routines = buildRoutines(sessions);
   const ctx = { byId, routines };
@@ -133,6 +161,16 @@ function buildState(board, scanResult) {
 
   const cards = board.cards.map((card) => {
     const subs = card.subtasks.map((sub) => effectiveSub(sub, ctx));
+    const subById = new Map(subs.map((x) => [x.id, x]));
+    for (const x of subs) {
+      const parent = x.forSub && subById.get(x.forSub);
+      if (!parent || parent.kind !== 'manual') {
+        delete x.forSub; // its checklist item is gone: it stands on its own
+        continue;
+      }
+      parent.sessions = (parent.sessions || 0) + 1;
+      if (x.lastActivityAt > parent.lastActivityAt) parent.lastActivityAt = x.lastActivityAt;
+    }
     const counts = { total: subs.length, done: 0, running: 0, needs: 0, review: 0 };
     const prs = new Map();
     const tickets = new Set(card.ticket ? [card.ticket] : []);
@@ -151,7 +189,11 @@ function buildState(board, scanResult) {
       for (const t of s.tickets) tickets.add(t);
       if (s.lastActivityAt > lastActivityAt) lastActivityAt = s.lastActivityAt;
     }
-    return { ...card, view: { subs, counts, prs: [...prs.values()], tickets: [...tickets], lastActivityAt: lastActivityAt || card.updatedAt, folder: folderOf(card) } };
+    // a PR one session tracks is shown with its state, even if another only mentions it
+    const tracked = new Set([...prs.values()].map(resources.trackedPr));
+    const related = resources.merge(subs.map((sub) => (byId.get(sub.sessionId) || {}).resources)).filter((r) => !tracked.has(r.key));
+    const folder = folderOf(card);
+    return { ...card, view: { subs, counts, prs: [...prs.values()], resources: related, tickets: [...tickets], lastActivityAt: lastActivityAt || card.updatedAt, folder, workflows: workflowViews(card, folder) } };
   });
 
   // Connections nobody drew but the sessions imply.
@@ -232,6 +274,7 @@ function buildState(board, scanResult) {
     implicit,
     sessions,
     groups: scanResult.groups,
+    focus: focus.build(sessions, routines),
     routines: [...routines.values()].map((r) => ({ id: r.id, title: r.title, runs: r.runs.length, latestId: r.latest.id, cardId: routineCard.get(r.id) || null })),
     paths: { data: P.DATA_DIR, board: P.BOARD_FILE, cards: P.CARDS_DIR },
   };
@@ -254,8 +297,8 @@ function planAutoLinks(board, sessions) {
   const free = (s) => !linked.has(s.id) && !(meta[s.id] && meta[s.id].noAuto) && !(s.routineId && routineIds.has(s.routineId));
   const live = board.cards.filter((c) => !c.archived);
   const adds = [];
-  const claim = (s, cardId, via) => {
-    adds.push({ cardId, sessionId: s.id, via });
+  const claim = (s, cardId, via, subtask) => {
+    adds.push(subtask ? { cardId, sessionId: s.id, via, subtask } : { cardId, sessionId: s.id, via });
     linked.set(s.id, cardId);
   };
   for (const s of sessions) {
@@ -263,7 +306,7 @@ function planAutoLinks(board, sessions) {
     // started with a card's brief ("Start a session"): it belongs to that card, whether or not it says so itself
     const byBrief = s.briefCard && live.find((c) => c.key === s.briefCard);
     if (byBrief) {
-      claim(s, byBrief.id, 'brief');
+      claim(s, byBrief.id, 'brief', briefItem(byBrief, s));
       continue;
     }
     const byGroup = s.groupId && live.find((c) => c.auto.groupId === s.groupId);
@@ -291,14 +334,45 @@ function planAutoLinks(board, sessions) {
   return adds;
 }
 
+/** The checklist item of `card` a session was started from ("Start a session" on a sub-task), if it is still there. */
+function briefItem(card, s) {
+  const item = s.briefSub && card.subtasks.find((x) => x.id === s.briefSub);
+  return item && !item.sessionId && !item.routineId ? item.id : '';
+}
+
+/**
+ * Sessions started from a checklist item that are on the card but not yet under
+ * the item: usually because the session linked itself first, as its brief asks.
+ * Returns [{cardId, sessionId, subtask}].
+ */
+function planNesting(board, sessions) {
+  const byId = new Map(sessions.map((s) => [s.id, s]));
+  const out = [];
+  for (const card of board.cards) {
+    for (const sub of card.subtasks) {
+      const s = sub.sessionId && !sub.forSub && byId.get(sub.sessionId);
+      const item = s && s.briefCard === card.key && briefItem(card, s);
+      if (item) out.push({ cardId: card.id, sessionId: s.id, subtask: item });
+    }
+  }
+  return out;
+}
+
 /** Apply the linking rules. Returns how many sessions were linked. */
 function applyAutoLinks(scanResult) {
   if (!store.exists()) return 0;
-  if (!planAutoLinks(store.load(), scanResult.sessions).length) return 0;
+  const before = store.load();
+  if (!planAutoLinks(before, scanResult.sessions).length && !planNesting(before, scanResult.sessions).length) return 0;
   return store.mutate((b) => {
     const adds = planAutoLinks(b, scanResult.sessions); // again, under the lock
     const byCard = new Map();
+    const nested = planNesting(b, scanResult.sessions);
+    for (const a of nested) store.OPS['session.link'](b, { card: a.cardId, sessionIds: [a.sessionId], subtask: a.subtask });
     for (const a of adds) {
+      if (a.subtask) {
+        store.OPS['session.link'](b, { card: a.cardId, sessionIds: [a.sessionId], via: a.via, subtask: a.subtask });
+        continue;
+      }
       if (!byCard.has(a.cardId)) byCard.set(a.cardId, new Map());
       const m = byCard.get(a.cardId);
       if (!m.has(a.via)) m.set(a.via, []);
@@ -307,7 +381,7 @@ function applyAutoLinks(scanResult) {
     for (const [cardId, vias] of byCard) {
       for (const [via, sessionIds] of vias) store.OPS['session.link'](b, { card: cardId, sessionIds, via });
     }
-    return adds.length;
+    return adds.length + nested.length;
   });
 }
 
@@ -533,7 +607,20 @@ function fmtDate(ms) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-function cardMarkdown(card, state) {
+function fmtSize(n) {
+  if (n < 1024) return `${n} B`;
+  return n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+}
+
+/** Text as Claude reads it: a link to an attachment points at the file on disk. */
+function withFilePaths(text, card) {
+  return String(text).replace(/(!?)\[([^\]\n]*)\]\(attachment:(a_[0-9a-f]{8})\)/g, (_, bang, label, id) => {
+    const att = card.attachments.find((f) => f.id === id);
+    return att ? `${bang}[${label || att.name}](${store.attachmentFile(att)})` : `${label || 'Attachment'} (removed)`;
+  });
+}
+
+function cardMarkdown(card, state, sort) {
   const colName = (id) => (state.columns.find((c) => c.id === id) || { name: id }).name;
   const byId = new Map(state.sessions.map((s) => [s.id, s]));
   const cardById = new Map(state.cards.map((c) => [c.id, c]));
@@ -548,21 +635,25 @@ function cardMarkdown(card, state) {
   L.push(head.join(' · '));
   if (v.folder) L.push(`Project folder: ${v.folder}`);
   L.push(`Board: ${P.boardUrl('card=' + card.key)}`, `Updated: ${fmtDate(card.updatedAt)}`, '');
-  if (card.description.trim()) L.push('## Description', '', card.description.trim(), '');
-  L.push(`## Sub-tasks (${v.counts.done}/${v.counts.total} done)`, '');
+  if (card.description.trim()) L.push('## Description', '', withFilePaths(card.description.trim(), card), '');
+  const sorted = SORTS[sort] && sort !== 'board' ? ` · sorted: ${SORTS[sort].toLowerCase()}` : '';
+  L.push(`## Sub-tasks (${v.counts.done}/${v.counts.total} done${sorted})`, '');
   if (!v.subs.length) L.push('_None yet._');
-  for (const sub of v.subs) {
+  for (const sub of subTree(v.subs, sort)) {
     const box = sub.status === 'done' ? '[x]' : '[ ]';
-    let line = `- ${box} ${sub.title} — ${SUB_LABEL[sub.status] || sub.status}`;
+    const pad = '  '.repeat(sub.depth);
+    let line = `${pad}- ${box} ${sub.title} — ${SUB_LABEL[sub.status] || sub.status}`;
     const s = sub.sessionId && byId.get(sub.sessionId);
+    if (sub.kind === 'manual') line += ` (sub-task id \`${sub.id}\`${sub.sessions ? `; ${sub.sessions} session${sub.sessions === 1 ? '' : 's'} on it, below` : ''})`;
     if (sub.kind === 'routine') line += ` (scheduled task, ${sub.runs || 0} runs; latest run below)`;
     if (s) {
-      line += `\n  - Claude session \`${s.id}\`: ${STATE_LABEL[s.estate] || s.estate}, last active ${fmtDate(s.lastActivityAt)}${s.projectName ? `, in ${s.projectName}` : ''}`;
-      if (s.estate === 'needs_you' && s.summary && s.summary.needsAction) line += `\n  - Waiting on the user: ${s.summary.needsAction}`;
-      else if (s.summary && s.summary.detail) line += `\n  - Latest: ${s.summary.detail}`;
-      if (s.steps) line += `\n  - Steps: ${s.steps.done}/${s.steps.total}${s.steps.current ? `, now on "${s.steps.current}"` : ''}`;
-      if (s.prs.length) line += `\n  - PRs: ${s.prs.map((p) => `${p.repo}#${p.number}${p.state ? ` (${p.state.toLowerCase()})` : ''}`).join(', ')}`;
-      if (s.wrapUp) line += `\n  - Outcome: ${s.wrapUp}`;
+      const at = `\n${pad}  - `;
+      line += `${at}Claude session \`${s.id}\`: ${STATE_LABEL[s.estate] || s.estate}, started ${fmtDate(s.createdAt)}, last active ${fmtDate(s.lastActivityAt)}${s.projectName ? `, in ${s.projectName}` : ''}`;
+      if (s.estate === 'needs_you' && s.summary && s.summary.needsAction) line += `${at}Waiting on the user: ${s.summary.needsAction}`;
+      else if (s.summary && s.summary.detail) line += `${at}Latest: ${s.summary.detail}`;
+      if (s.steps) line += `${at}Steps: ${s.steps.done}/${s.steps.total}${s.steps.current ? `, now on "${s.steps.current}"` : ''}`;
+      if (s.prs.length) line += `${at}PRs: ${s.prs.map((p) => `${p.repo}#${p.number}${p.state ? ` (${p.state.toLowerCase()})` : ''}`).join(', ')}`;
+      if (s.wrapUp) line += `${at}Outcome: ${s.wrapUp}`;
     }
     L.push(line);
   }
@@ -583,9 +674,31 @@ function cardMarkdown(card, state) {
     if (o) conns.push(`- possibly related to ${o.key} · ${o.title}: ${p.reasons.join('; ')}`);
   }
   if (conns.length) L.push('## Connections', '', ...conns, '');
+  if ((card.workflows || []).length) {
+    L.push('## Workflows', '', '_Saved prompts the board runs on its own with `claude -p`, on the Claude login of this Mac. Start one with board_run_workflow._', '');
+    for (const wf of card.workflows) {
+      const wv = (v.workflows || []).find((x) => x.id === wf.id) || {};
+      const bits = [wv.schedule || 'Run by hand', `access: ${(workflows.ACCESS[wf.access] || workflows.ACCESS.read).label.toLowerCase()}`];
+      if (!wf.enabled) bits.push('schedule paused');
+      if (wv.nextAt) bits.push(`next run ${fmtDate(wv.nextAt)}`);
+      L.push(`- **${wf.name}** (\`${wf.id}\`) — ${bits.join(' · ')}${wv.folder ? `, in ${wv.folder}` : ''}`);
+      const r = wv.last;
+      if (r) L.push(`  - Last run ${fmtDate(r.startedAt)}: ${r.status}${r.status === 'running' && r.activity ? ` (${r.activity})` : ''}${r.error ? ` — ${r.error}` : ''}`);
+    }
+    L.push('');
+  }
+  if (card.attachments.length) {
+    L.push('## Attachments', '');
+    for (const f of card.attachments) L.push(`- ${f.name} (${fmtSize(f.size)}): ${store.attachmentFile(f)}`);
+    L.push('');
+  }
   if (card.notes.length) {
     L.push('## Notes', '');
-    for (const n of card.notes.slice(-30)) L.push(`- ${fmtDate(n.at)} (${n.by}): ${n.text.replace(/\n+/g, ' ')}`);
+    for (const n of card.notes.slice(-30)) {
+      // indented, so a note's own lists and paragraphs stay inside its bullet
+      const body = withFilePaths(n.text, card).split('\n').map((l, i) => (i && l ? `  ${l}` : l)).join('\n');
+      L.push(`- ${fmtDate(n.at)} (${n.by}): ${body}`);
+    }
     L.push('');
   }
   L.push('---', 'Generated by Taskboard; edits to this file are overwritten. Change the card in the board, with the `taskboard` command, or with the `board_*` tools.', '');
@@ -612,11 +725,17 @@ function overviewMarkdown(state) {
 
 /** The opening prompt for a new Claude session that is going to work on a card. */
 /** The prompt a new session for a card starts with; `folder` is where the card's project lives, when known. */
-function sessionBrief(card, folder) {
+function sessionBrief(card, folder, item) {
   // The folder is also on the link that opens Claude; saying it here lets the
   // session notice if it was started somewhere else all the same.
   const where = folder ? ` in the project folder ${folder} (if this session is in a different folder, tell me before doing anything else)` : '';
-  return `Work on Taskboard card ${card.key} "${card.title}"${where}.\n\nFirst read the card with board_get_card (card: "${card.key}"), or the file ~/.claude/taskboard/cards/${card.key}.md, and link this session to it with board_link_session. Then: `;
+  if (!item) {
+    return `Work on Taskboard card ${card.key} "${card.title}"${where}.\n\nFirst read the card with board_get_card (card: "${card.key}"), or the file ~/.claude/taskboard/cards/${card.key}.md, and link this session to it with board_link_session. Then: `;
+  }
+  // One item of a bigger task: the card is the context, the item is the job.
+  const title = String(item.title).replace(/\s+/g, ' ').trim();
+  // the item's id comes first: Claude keeps only the start of a session's first prompt
+  return `Work on Taskboard card ${card.key}, sub-task ${item.id} "${title}" (part of "${card.title}")${where}.\n\nThis session does that one sub-task; the card is the task it belongs to. First read the card with board_get_card (card: "${card.key}"), or the file ~/.claude/taskboard/cards/${card.key}.md, for its description, notes and what its other sessions already did, and link this session to it with board_link_session (card: "${card.key}", subtask: "${item.id}"). Then: ${title}`;
 }
 
 /** The link that opens Claude's new-session page with the brief in the prompt box, in `folder` when given. */

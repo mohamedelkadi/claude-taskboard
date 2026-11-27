@@ -10,6 +10,7 @@ const store = require('./store');
 const claude = require('./claude');
 const view = require('./view');
 const diary = require('./diary');
+const search = require('./search');
 const daemon = require('./daemon');
 const macapp = require('./macapp');
 
@@ -32,7 +33,9 @@ const HELP = `taskboard — a kanban board over your Claude sessions
   taskboard note <card> "<text>"
   taskboard link <card> [session-id]        link a session (default: the Claude session running this)
   taskboard connect <from> <to> [blocks|relates|parent]
+  taskboard run <card> [workflow]           run one of a card's workflows now (claude -p, no API key)
   taskboard sessions [query] [--unsorted]   find sessions
+  taskboard search "<words>" [--project name] [--limit 10]   search inside every conversation
   taskboard diary [today|yesterday|YYYY-MM-DD] [--days 7] [--project name]   what you did
   taskboard diary --search "<words>"         search every day
   taskboard app [--remove]      build the Mac app into ~/Applications (needs Xcode's Swift)
@@ -67,12 +70,7 @@ function snapshot() {
   return view.buildState(store.load(), scanResult);
 }
 
-function findClaude() {
-  const candidates = [path.join(os.homedir(), '.local', 'bin', 'claude'), '/opt/homebrew/bin/claude', '/usr/local/bin/claude'];
-  for (const c of candidates) if (fs.existsSync(c)) return c;
-  const r = spawnSync('which', ['claude'], { encoding: 'utf8' });
-  return r.status === 0 ? r.stdout.trim() : null;
-}
+const findClaude = () => require('./workflows').findClaude();
 
 function mcpRegistered() {
   try {
@@ -169,6 +167,10 @@ async function doctor() {
   console.log(`     ${scan.sessions.length} sessions found, ${scan.sessions.filter((s) => !s.archived).length} not archived, ${scan.groups.length} sidebar groups`);
   const kept = diary.stats();
   console.log(`     diary: ${kept.days} days, ${Math.max(1, Math.round(kept.bytes / 1024))} KB in ${P.DIARY_DIR}`);
+  const index = search.status();
+  console.log(index.available
+    ? `     conversation search: ${index.sessions} sessions, ${Math.round((index.bytes || 0) / 1e6)} MB in ${search.DB_FILE}`
+    : `     conversation search: off, it needs Node 22.13 or newer (this is ${index.node})`);
   if (up && up.error) console.log(`     last scan error: ${up.error}`);
 }
 
@@ -245,6 +247,11 @@ async function main() {
       const sub = store.apply('subtask.add', { card: a[0], title: a.slice(1).join(' ') });
       return console.log(`added sub-task "${sub.title}"`);
     }
+    case 'run': {
+      const j = await daemon.call('/api/workflow/run', { card: a[0], workflow: a.slice(1).join(' ') });
+      if (!j.ok) throw new store.UserError(j.error || 'The workflow did not start.');
+      return console.log(`Started. Follow it on the card: ${P.boardUrl('card=' + store.findCard(store.load(), a[0]).key)}`);
+    }
     case 'note': {
       store.apply('note.add', { card: a[0], text: a.slice(1).join(' ') });
       return console.log('note added');
@@ -273,6 +280,10 @@ async function main() {
         console.log(`${s.id}  ${view.STATE_LABEL[s.estate].padEnd(16)} ${s.title.slice(0, 60).padEnd(60)} ${card ? card.key : '-'}`);
       }
       return;
+    }
+    case 'search': {
+      if (!a.length) throw new store.UserError('Give some words to search for: taskboard search "<words>"');
+      return console.log(search.markdown({ q: a.join(' '), limit: f.limit, project: f.project }, snapshot()));
     }
     case 'diary': {
       const day = a.length ? diary.parseDay(a[0]) : '';
