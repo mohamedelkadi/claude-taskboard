@@ -58,7 +58,7 @@ The board keeps a diary of the user's work in Claude: for each day, what they as
 ## When working on a card
 
 1. Read the card with `board_get_card` before starting. The notes and the other sessions' outcomes are the context the user does not want to repeat.
-2. If this session is not on the card yet, link it with `board_link_session`. If the brief names a sub-task ("sub-task s_…"), pass it as `subtask` so the session sits under that item, and treat the item as the job and the card as its context.
+2. If this session is not on the card yet, link it with `board_link_session`. If the brief names a sub-task ("sub-task s_…"), pass it as `subtask` so the item becomes this session's row, and treat the item as the job and the card as its context.
 3. Break real work into sub-tasks on the card only when the user asks for a breakdown or the card has none and the work has clear parts. This session's own step list already shows on the card.
 4. When you finish, or stop on something the user must decide, add one note with `board_add_note`: what was done, what is left, anything the next session needs. Keep it to a few sentences.
 

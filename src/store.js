@@ -261,6 +261,24 @@ function sanitizeAuto(a) {
 
 // ---------- operations ----------
 
+/**
+ * Take sessions off a card. A checklist item that turned into a session when it was
+ * started goes back to being that checklist item. Returns how many were taken off.
+ */
+function dropSessions(card, ids) {
+  let n = 0;
+  const next = [];
+  for (const s of card.subtasks) {
+    if (!ids.has(s.sessionId)) next.push(s);
+    else {
+      n++;
+      if (s.fromItem) next.push({ id: s.id, title: s.title, status: 'in_progress', createdAt: s.createdAt });
+    }
+  }
+  card.subtasks = next;
+  return n;
+}
+
 const OPS = {
   'card.create'(b, a) {
     const title = clean(a.title, 200);
@@ -414,20 +432,26 @@ const OPS = {
     const card = findCard(b, a.card);
     const ids = [...new Set((Array.isArray(a.sessionIds) ? a.sessionIds : [a.sessionId]).filter(Boolean).map(String))];
     if (!ids.length) throw new UserError('Which session?');
-    // `subtask`: the checklist item the session works on; it is shown under that item
-    const parent = a.subtask ? findSubtask(card, a.subtask) : null;
+    // `subtask`: the checklist item the session works on. The item itself becomes the
+    // session's row (it keeps its title); only a second session on it is shown under it.
+    let parent = a.subtask ? findSubtask(card, a.subtask) : null;
+    if (parent && parent.sessionId && ids.length === 1 && parent.sessionId === ids[0]) parent = null; // already its row
     if (parent && (parent.sessionId || parent.routineId)) throw new UserError('A session can only go under a checklist item, not under another session.');
     const t = now();
     for (const sid of ids) {
       for (const c of b.cards) {
         if (c.id === card.id) continue;
-        const before = c.subtasks.length;
-        c.subtasks = c.subtasks.filter((s) => s.sessionId !== sid);
-        if (c.subtasks.length !== before) touch(c);
+        if (dropSessions(c, new Set([sid]))) touch(c);
       }
       let row = card.subtasks.find((s) => s.sessionId === sid);
-      if (!row) card.subtasks.push((row = { id: 's_' + rid(), title: '', status: 'auto', sessionId: sid, via: a.via || 'manual', createdAt: t }));
-      if (parent) {
+      if (parent && !parent.sessionId && !card.subtasks.some((s) => s.forSub === parent.id && s.sessionId !== sid)) {
+        // the first session on the item: the item turns into that session, no second row
+        if (row) card.subtasks = card.subtasks.filter((s) => s !== row);
+        Object.assign(parent, { status: 'auto', sessionId: sid, via: a.via || 'manual', fromItem: true });
+        delete parent.forSub;
+        row = null;
+      } else if (!row) card.subtasks.push((row = { id: 's_' + rid(), title: '', status: 'auto', sessionId: sid, via: a.via || 'manual', createdAt: t }));
+      if (row && parent) {
         row.forSub = parent.id;
         if (parent.status === 'todo') parent.status = 'in_progress'; // a session is working on it now
       }
@@ -446,10 +470,9 @@ const OPS = {
     const ids = new Set((Array.isArray(a.sessionIds) ? a.sessionIds : [a.sessionId]).filter(Boolean).map(String));
     let n = 0;
     for (const c of b.cards) {
-      const before = c.subtasks.length;
-      c.subtasks = c.subtasks.filter((s) => !ids.has(s.sessionId));
-      if (c.subtasks.length !== before) {
-        n += before - c.subtasks.length;
+      const k = dropSessions(c, ids);
+      if (k) {
+        n += k;
         touch(c);
       }
     }

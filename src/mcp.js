@@ -93,7 +93,7 @@ const TOOLS = [
       properties: {
         card: { type: 'string', description: 'Card key or title. Required unless unlinking.' },
         session_id: { type: 'string', description: 'A session id from board_find_sessions. Default: this session.' },
-        subtask: { type: 'string', description: 'The checklist sub-task (title or id) the session works on: it is shown under that item. A session started from a sub-task is given this in its brief.' },
+        subtask: { type: 'string', description: 'The checklist sub-task (title or id) the session works on: the item becomes this session's row. A session started from a sub-task is given this in its brief.' },
         unlink: { type: 'boolean', description: 'Take the session off its card instead.' },
       },
     },

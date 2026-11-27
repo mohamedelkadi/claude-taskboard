@@ -346,26 +346,42 @@ test('a session started from a checklist item joins the card under that item', a
   const s = scan.sessions.find((x) => x.id === id);
   assert.deepEqual([s.briefCard, s.briefSub], [made.key, item.id]);
   assert.equal(view.applyAutoLinks(scan), 1);
+  // TB-45: the item itself becomes the session's row; no second sub-task under it
   let subs = card(state(), 'Parent task').view.subs;
-  const row = subs.find((x) => x.sessionId === id);
-  const parent = subs.find((x) => x.id === item.id);
-  assert.equal(row.forSub, item.id);
-  assert.deepEqual([parent.status, parent.sessions], ['in_progress', 1], 'the item is being worked on now');
-  assert.ok(parent.lastActivityAt >= row.lastActivityAt, 'an item is at least as recent as its sessions');
+  assert.equal(subs.length, 1, 'starting an item does not add another sub-task');
+  assert.deepEqual([subs[0].id, subs[0].sessionId, subs[0].kind, subs[0].title, subs[0].auto], [item.id, id, 'session', 'Sort the sub-tasks', true]);
+  assert.equal(subs[0].forSub, undefined);
+  assert.equal(view.applyAutoLinks(claude.scan()), 0, 'settled: nothing left to nest');
 
-  // linked by the session itself first, without the item: the board still files it under the item
+  // the session links itself as its brief asks, with or without the item: still one row
+  store.apply('session.link', { card: made.id, sessionIds: [id], via: 'claude', subtask: item.id });
   store.apply('session.link', { card: made.id, sessionIds: [id], via: 'claude' });
-  store.mutate((b) => {
-    delete b.cards.find((c) => c.id === made.id).subtasks.find((x) => x.sessionId === id).forSub;
-  });
-  assert.equal(view.applyAutoLinks(claude.scan()), 1);
-  assert.equal(card(state(), 'Parent task').view.subs.find((x) => x.sessionId === id).forSub, item.id);
+  assert.equal(card(state(), 'Parent task').view.subs.length, 1);
 
-  // the item removed: its session stays on the card, on its own
-  store.apply('subtask.remove', { card: made.id, subtask: item.id });
+  // taken off the card: the checklist item is left, in progress
+  store.apply('session.unlink', { sessionIds: [id] });
   subs = card(state(), 'Parent task').view.subs;
-  assert.equal(subs.find((x) => x.sessionId === id).forSub, undefined);
-  assert.throws(() => store.apply('session.link', { card: made.id, sessionIds: [fx.ids.other], subtask: subs[0].id }), /checklist item/);
+  assert.deepEqual(subs.map((x) => [x.id, x.kind, x.title, x.status]), [[item.id, 'manual', 'Sort the sub-tasks', 'in_progress']]);
+
+  // linked by the session itself first, without the item: the board still turns the item into it
+  store.apply('session.link', { card: made.id, sessionIds: [id], via: 'claude' });
+  assert.equal(card(state(), 'Parent task').view.subs.length, 2);
+  assert.equal(view.applyAutoLinks(claude.scan()), 1);
+  subs = card(state(), 'Parent task').view.subs;
+  assert.deepEqual(subs.map((x) => [x.id, x.sessionId]), [[item.id, id]]);
+
+  // another session cannot go under a session
+  assert.throws(() => store.apply('session.link', { card: made.id, sessionIds: [fx.ids.other], subtask: item.id }), /checklist item/);
+
+  // a second item with older-style nested rows still shows the session under it
+  const item2 = store.apply('subtask.add', { card: made.id, title: 'Second' });
+  store.mutate((b) => {
+    b.cards.find((c) => c.id === made.id).subtasks.push({ id: 's_legacy01', title: '', status: 'auto', sessionId: fx.ids.other, forSub: item2.id, createdAt: Date.now() });
+  });
+  subs = card(state(), 'Parent task').view.subs;
+  assert.equal(subs.find((x) => x.sessionId === fx.ids.other).forSub, item2.id);
+  store.apply('subtask.remove', { card: made.id, subtask: item2.id });
+  assert.equal(card(state(), 'Parent task').view.subs.find((x) => x.sessionId === fx.ids.other).forSub, undefined);
 });
 
 test('sub-tasks sort by any of their dates, state or title, with sessions under their item', () => {

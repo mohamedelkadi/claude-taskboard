@@ -106,7 +106,7 @@ function subRow(card, sub) {
 
   const buttons = linked
     ? `${openButton(s, sub.state === 'needs_you' ? 'primary' : '')}<button class="icon-btn" data-act="${s ? 'sub-toggle' : 'sub-remove'}" data-sub="${esc(sub.id)}" title="${s ? 'Details' : 'Remove'}">${s ? (open ? '▴' : '▾') : '✕'}</button>`
-    : `<button class="btn small ghost sub-start" data-act="sub-start" data-sub="${esc(sub.id)}" title="Open a new Claude session for this sub-task, with the card as its context. It shows up under this item.">▶ Start</button><button class="icon-btn" data-act="sub-remove" data-sub="${esc(sub.id)}" title="Remove">✕</button>`;
+    : `<button class="btn small ghost sub-start" data-act="sub-start" data-sub="${esc(sub.id)}" title="Open a new Claude session for this sub-task, with the card as its context. This item becomes that session.">▶ Start</button><button class="icon-btn" data-act="sub-remove" data-sub="${esc(sub.id)}" title="Remove">✕</button>`;
 
   return `<div class="sub${sub.status === 'done' ? ' is-done' : ''}${linked ? ' linked' : ''}${open ? ' expanded' : ''}${sub.depth ? ' nested' : ''}">${select}<div class="sub-main">${title}${meta}${needs}${detail}</div>${buttons}</div>`;
 }
