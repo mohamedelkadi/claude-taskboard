@@ -27,6 +27,7 @@ module.exports = {
   CACHE_DIR: path.join(DATA_DIR, 'cache'),
   DIARY_DIR: path.join(DATA_DIR, 'diary'),
   ATTACH_DIR: path.join(DATA_DIR, 'attachments'),
+  RUNS_DIR: path.join(DATA_DIR, 'runs'), // what each workflow run streamed
   LOG_FILE: path.join(DATA_DIR, 'server.log'),
   PID_FILE: path.join(DATA_DIR, 'server.pid'),
   // read from Claude (never written)

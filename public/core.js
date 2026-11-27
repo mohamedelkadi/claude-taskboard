@@ -3,7 +3,7 @@
 
 const S = {
   data: null,
-  view: 'board', // board | focus | needs | sessions | graph | diary
+  view: 'board', // board | focus | needs | sessions | workflows | graph | diary
   q: '',
   project: '',
   cardId: null, // card open in the drawer
@@ -362,6 +362,7 @@ function renderTop() {
         <button class="tab" data-act="view" data-view="focus" title="One decision at a time  (F)">Focus <span class="pill needs" id="n-focus"></span></button>
         <button class="tab" data-act="view" data-view="needs">Needs me <span class="pill needs" id="n-needs"></span></button>
         <button class="tab" data-act="view" data-view="sessions">Sessions <span class="pill" id="n-unsorted" title="Open sessions that are not on a card"></span></button>
+        <button class="tab" data-act="view" data-view="workflows" title="Every card's workflows: what runs next, what is running, what failed">Workflows <span class="pill" id="n-wf"></span></button>
         <button class="tab" data-act="view" data-view="graph">Connections</button>
         <button class="tab" data-act="view" data-view="diary">Diary</button>
       </nav>
@@ -379,6 +380,7 @@ function renderTop() {
   needs.textContent = x.needs.length || '';
   needs.hidden = !x.needs.length;
   focusPill();
+  workflowsPill();
   const uns = $('#n-unsorted');
   uns.textContent = x.unsorted.length || '';
   uns.hidden = !x.unsorted.length;
@@ -404,6 +406,7 @@ function renderMain() {
   focusLeave();
   if (S.view === 'needs') return swap(main, renderNeeds());
   if (S.view === 'sessions') return swap(main, renderSessions());
+  if (S.view === 'workflows') return swap(main, renderWorkflows());
   if (S.view === 'graph') return renderGraph(main);
   if (S.view === 'diary') return swap(main, renderDiary());
   return swap(main, renderBoard());
@@ -435,7 +438,7 @@ function readHash() {
   } else if (m && S.data) {
     const card = S.data.cards.find((c) => c.key.toLowerCase() === m[1].toLowerCase() || c.id === m[1]);
     if (card) S.cardId = card.id;
-  } else if (['focus', 'needs', 'sessions', 'graph', 'board'].includes(h)) {
+  } else if (['focus', 'needs', 'sessions', 'workflows', 'graph', 'board'].includes(h)) {
     // the Mac app's menus navigate this way
     S.view = h;
     S.cardId = null;

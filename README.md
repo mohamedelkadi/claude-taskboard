@@ -105,6 +105,23 @@ Further down the card:
 - **Notes** are where you, and Claude sessions working on the card, leave decisions and where things stand for whoever picks it up next. They render Markdown: headings, lists, tasks, quotes, code blocks and tables.
 - **Attachments** are images and files kept on the card, up to 25 MB each. Paste a screenshot or drop a file anywhere on an open card; in a note or the description it also lands where you are typing. Claude sessions get each file's path, so they can open it.
 
+### Workflows: let Claude do a card's routine work on its own
+
+A **workflow** is a prompt saved on a card that the board runs for you with Claude Code, in the background, whenever you press **▶ Run now** or on a schedule (every few hours, every day, weekdays, or once a week). It runs on the Claude login of this Mac (your subscription), so there is no API key to create or keep anywhere.
+
+- **New workflow** on a card asks for a name, what Claude should do (or start from an example: a morning summary, running the tests, checking a pull request, running a saved Claude workflow), the folder it works in (by default the one the card's sessions use), and what it may do:
+  - **Read and report** reads files and runs only the commands your Claude settings already allow. The safe place to start.
+  - **Edit files** also creates and changes files in its folder.
+  - **Anything** runs any command without asking, and has to be confirmed in so many words.
+- Nobody is there to answer while it runs, so what would need an approval is skipped. The run's log marks each skipped action, and the card counts them, so you can see when a workflow needs more room.
+- While it runs, the card shows what it is doing and for how long; **Watch** opens its log as it streams, and **Stop** ends it. The board card shows ⚙ while one runs, and when one failed.
+- When it finishes, its report is added to the card's notes (you can turn that off), where the card's next sessions read it. Each workflow keeps its last 10 runs, each with its log and a **Continue in terminal** command that resumes that run's session.
+- If Claude's login has expired, the run says so and how to log in again. The editor shows the login and how long it lasts: using Claude does not extend it, so log in again before it runs out if you rely on schedules.
+- The **Workflows** tab at the top lists every card's workflows in one place: what is running now, what failed last time, what runs next in order, and those you run by hand. Its pill counts the running ones (or, in red, the failed ones). **New workflow** there asks which card it belongs to.
+- Scheduled runs happen while the Mac is awake and the board is running. A time missed while the Mac slept runs once when it wakes. At most three workflows run at a time, each within its time limit (30 minutes unless you pick another).
+
+Claude sessions can start a workflow with `board_run_workflow`, and a terminal with `taskboard run TB-3 "Morning summary"`.
+
 ### 4. See what is waiting on you
 
 **Needs me** lists every session that stopped to ask you something, with the question and the card it belongs to, followed by the sessions that are ready for review.
@@ -177,6 +194,7 @@ Each card is also a file Claude can read: `~/.claude/taskboard/cards/TB-4.md`.
 | `board_search_conversations` | Search inside every session, for one you remember but cannot name |
 | `board_diary` | What you did on a day or over a span of days, or a search across every day |
 | `board_diary_note` | Add a line to your own note for a day |
+| `board_run_workflow` | Run one of a card's workflows now |
 
 ### 9. Use it from the terminal
 
@@ -185,7 +203,7 @@ taskboard ls [--all]            taskboard show TB-3
 taskboard add "<title>" [--status "In progress"] [--ticket PROJ-1]
 taskboard move TB-3 "In review" taskboard sub TB-3 "<title>"
 taskboard note TB-3 "<text>"    taskboard link TB-3 [session-id]
-taskboard connect TB-3 TB-7 blocks
+taskboard connect TB-3 TB-7 blocks  taskboard run TB-3 [workflow]
 taskboard sessions [query] [--unsorted]
 taskboard search "<words>" [--project name] [--limit 10]
 taskboard diary [today|yesterday|YYYY-MM-DD] [--days 7] [--project name]
@@ -213,6 +231,7 @@ Writes:
 
 - `~/.claude/taskboard/board.json` — the board (hourly copies in `backups/`)
 - `~/.claude/taskboard/cards/*.md` and `BOARD.md` — generated copies for Claude to read
+- `~/.claude/taskboard/runs/` — what each workflow run streamed, for its log. A workflow keeps its last 10 runs; deleting it deletes them
 - `~/.claude/taskboard/attachments/` — the images and files kept on cards. Removing one from its card, or deleting the card, deletes the file
 - `~/.claude/taskboard/diary/` — the diary: one file per day in `days/`, and each session's title, project and card in `sessions.json`. Plain JSON; delete a day's file to forget that day
 - `~/.claude/taskboard/cache/` — what it has already read from transcripts, and how far. `cache/search/index.db` is the conversation search index; it is safe to delete and is rebuilt from the transcripts
@@ -221,7 +240,7 @@ Writes:
 - `~/.local/bin/taskboard` — the command
 - `~/Applications/Taskboard.app` — the Mac app (built on your Mac from `macapp/`, signed for that Mac only)
 
-The web server listens on 127.0.0.1 only and refuses requests from other sites. Nothing is sent anywhere.
+The web server listens on 127.0.0.1 only and refuses requests from other sites. Nothing is sent anywhere, except by the workflows you create: each run is a `claude -p` session, like one you would start yourself, and goes to Anthropic like any Claude session. A run is started without `ANTHROPIC_API_KEY`, even if your shell sets one, so it always uses your Claude login.
 
 ## Update and remove
 
@@ -244,7 +263,7 @@ taskboard uninstall --purge  # also deletes the board and the diary
 ## Development
 
 ```bash
-npm test                     # 47 tests, against fake Claude folders in a temp directory
+npm test                     # 79 tests, against fake Claude folders (and a fake claude command) in a temp directory
 ```
 
 ```bash
@@ -255,7 +274,7 @@ npm run demo                 # the board on made-up data, on port 4781
 npm run screenshots          # retake docs/screenshots from the demo (needs Node 22+ and Chrome)
 ```
 
-No dependencies and no build step. `src/store.js` is the board and its operations; `src/claude.js` reads Claude's files; `src/view.js` joins the two (statuses, detected connections, linking rules, first-run import); `src/diary.js` keeps the diary; `src/search.js` keeps the conversation index; `src/server.js`, `src/mcp.js` and `src/cli.js` are the three ways in; `public/` is the page; `macapp/` is the Mac app, a thin window around that page.
+No dependencies and no build step. `src/store.js` is the board and its operations; `src/claude.js` reads Claude's files; `src/view.js` joins the two (statuses, detected connections, linking rules, first-run import); `src/diary.js` keeps the diary; `src/search.js` keeps the conversation index; `src/workflows.js` runs and schedules workflows; `src/server.js`, `src/mcp.js` and `src/cli.js` are the three ways in; `public/` is the page; `macapp/` is the Mac app, a thin window around that page.
 
 ## Limits
 

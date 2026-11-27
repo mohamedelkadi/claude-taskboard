@@ -70,6 +70,8 @@ function normalize(b) {
     if (!Array.isArray(c.notes)) c.notes = [];
     if (!Array.isArray(c.attachments)) c.attachments = [];
     if (!Array.isArray(c.tags)) c.tags = [];
+    if (!Array.isArray(c.workflows)) c.workflows = [];
+    if (!Array.isArray(c.runs)) c.runs = [];
     if (!c.auto || typeof c.auto !== 'object') c.auto = {};
     if (typeof c.order !== 'number') c.order = 0;
     // when the card was put in its column: sessions that work after that can move it on
@@ -282,6 +284,8 @@ const OPS = {
       links: [],
       notes: [],
       attachments: [],
+      workflows: [],
+      runs: [],
       auto: sanitizeAuto(a.auto),
       archived: false,
       statusAt: t,
@@ -637,3 +641,6 @@ module.exports = {
   UserError, OPS, apply, mutate, load, save, exists, emptyBoard, normalize,
   findCard, findColumn, findSubtask, cardOfSession, attachmentFile, addAttachment,
 };
+
+// workflows add their own operations (workflow.save, …); loaded last, as it uses the above
+require('./workflows');

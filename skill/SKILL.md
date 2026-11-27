@@ -36,6 +36,7 @@ Prefer the MCP tools. If they are listed as deferred, load them first with ToolS
 | Find a session by what was said in it | `mcp__taskboard__board_search_conversations` |
 | What the user did on a day, or a search across every day | `mcp__taskboard__board_diary` |
 | Add a line to the user's own note for a day | `mcp__taskboard__board_diary_note` |
+| Run one of a card's workflows now (only when the user asks) | `mcp__taskboard__board_run_workflow` |
 
 Most tools take `card` as a key (`TB-12`) or a title, and default to the card this session is linked to.
 

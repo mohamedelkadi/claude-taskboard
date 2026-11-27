@@ -33,6 +33,7 @@ const HELP = `taskboard — a kanban board over your Claude sessions
   taskboard note <card> "<text>"
   taskboard link <card> [session-id]        link a session (default: the Claude session running this)
   taskboard connect <from> <to> [blocks|relates|parent]
+  taskboard run <card> [workflow]           run one of a card's workflows now (claude -p, no API key)
   taskboard sessions [query] [--unsorted]   find sessions
   taskboard search "<words>" [--project name] [--limit 10]   search inside every conversation
   taskboard diary [today|yesterday|YYYY-MM-DD] [--days 7] [--project name]   what you did
@@ -69,12 +70,7 @@ function snapshot() {
   return view.buildState(store.load(), scanResult);
 }
 
-function findClaude() {
-  const candidates = [path.join(os.homedir(), '.local', 'bin', 'claude'), '/opt/homebrew/bin/claude', '/usr/local/bin/claude'];
-  for (const c of candidates) if (fs.existsSync(c)) return c;
-  const r = spawnSync('which', ['claude'], { encoding: 'utf8' });
-  return r.status === 0 ? r.stdout.trim() : null;
-}
+const findClaude = () => require('./workflows').findClaude();
 
 function mcpRegistered() {
   try {
@@ -250,6 +246,11 @@ async function main() {
     case 'sub': {
       const sub = store.apply('subtask.add', { card: a[0], title: a.slice(1).join(' ') });
       return console.log(`added sub-task "${sub.title}"`);
+    }
+    case 'run': {
+      const j = await daemon.call('/api/workflow/run', { card: a[0], workflow: a.slice(1).join(' ') });
+      if (!j.ok) throw new store.UserError(j.error || 'The workflow did not start.');
+      return console.log(`Started. Follow it on the card: ${P.boardUrl('card=' + store.findCard(store.load(), a[0]).key)}`);
     }
     case 'note': {
       store.apply('note.add', { card: a[0], text: a.slice(1).join(' ') });

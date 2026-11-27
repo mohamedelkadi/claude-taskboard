@@ -211,7 +211,7 @@ function settingsHtml() {
   const d = S.data;
   const st = M.state;
   const archived = d.cards.filter((c) => c.archived);
-  const hidden = d.sessions.filter((s) => s.hidden).length;
+  const hidden = d.sessions.filter((s) => s.hidden && !s.workflowRun).length;
   return `<div class="dialog wide"><div class="dlg-head">Settings<span class="grow"></span><button class="icon-btn" data-act="modal-close">✕</button></div>
     <div class="dlg-body">
       <div class="form-row"><span>Columns</span>
@@ -288,7 +288,7 @@ ACTIONS['card-restore'] = async (el) => {
   repaintSettings();
 };
 ACTIONS['unhide-all'] = async () => {
-  await op('session.meta', { sessionIds: S.data.sessions.filter((s) => s.hidden).map((s) => s.id), hidden: false });
+  await op('session.meta', { sessionIds: S.data.sessions.filter((s) => s.hidden && !s.workflowRun).map((s) => s.id), hidden: false });
   repaintSettings();
 };
 ACTIONS.reveal = () => post('/api/reveal', {});

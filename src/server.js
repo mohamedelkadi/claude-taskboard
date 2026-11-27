@@ -14,6 +14,7 @@ const view = require('./view');
 const diary = require('./diary');
 const search = require('./search');
 const attachments = require('./attachments');
+const workflows = require('./workflows');
 
 const PUBLIC = path.join(__dirname, '..', 'public');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
@@ -312,6 +313,13 @@ async function handle(req, res) {
       res.writeHead(200, { 'content-type': 'application/json', 'content-disposition': 'attachment; filename="taskboard-board.json"' });
       return res.end(JSON.stringify(store.load(), null, 1));
     }
+    if (p === '/api/workflow/check') return json(res, 200, { ok: true, ...(await workflows.check()) });
+    if (p === '/api/workflow/log') {
+      const runId = url.searchParams.get('run') || '';
+      const card = (state ? state.cards : []).find((c) => (c.runs || []).some((r) => r.id === runId));
+      if (!card) return json(res, 404, { ok: false, error: 'That run is gone.' });
+      return json(res, 200, { ok: true, run: card.runs.find((r) => r.id === runId), events: workflows.readLog(runId) });
+    }
     const attachment = /^\/api\/attachments\/(a_[0-9a-f]{8})$/.exec(p);
     if (attachment) return serveAttachment(req, res, attachment[1]);
     if (p.startsWith('/api/')) return json(res, 404, { ok: false, error: 'Not found.' });
@@ -364,6 +372,18 @@ async function handle(req, res) {
       if (!body.copyOnly) launch(view.newSessionUrl(brief, folder));
       return json(res, 200, { ok: true, brief, folder });
     }
+    if (p === '/api/workflow/run') {
+      // the folder the card's sessions use, for a workflow that names none
+      const card = store.findCard(store.load(), body.card);
+      const shown = state && state.cards.find((c) => c.id === card.id);
+      const run = workflows.start(card.id, body.workflow, body.trigger === 'claude' ? 'claude' : 'manual', shown && shown.view.folder);
+      rebuild();
+      return send(res, 200, `{"ok":true,"result":${JSON.stringify(run)},"state":${stateJson}}`);
+    }
+    if (p === '/api/workflow/stop') {
+      if (!workflows.stop(String(body.run || ''), 'manual')) throw new store.UserError('That run is not running any more.');
+      return json(res, 200, { ok: true });
+    }
     if (p === '/api/reveal') {
       launch(P.DATA_DIR);
       return json(res, 200, { ok: true });
@@ -396,7 +416,21 @@ function main() {
   server.listen(P.PORT, P.HOST, () => {
     fs.writeFileSync(P.PID_FILE, String(process.pid));
     log(`taskboard listening on ${P.boardUrl()} (pid ${process.pid})`);
+    workflows.setLog(log);
+    try {
+      workflows.settleOrphans(); // runs this server was doing when it last stopped
+    } catch (e) {
+      log('workflows:', e.message);
+    }
     rescan();
+    // workflows whose schedule is due
+    setInterval(() => {
+      try {
+        if (state) workflows.tick(state);
+      } catch (e) {
+        log('workflow schedule:', e.message);
+      }
+    }, 30000).unref();
     watch(P.DESKTOP_SESSIONS_DIR, { recursive: true });
     watch(P.LIVE_DIR, {});
     watch(P.DESKTOP_DIR, {}, (f) => f === path.basename(P.DESKTOP_CONFIG));
@@ -416,6 +450,7 @@ function main() {
     }, 15000).unref();
   });
   const bye = () => {
+    workflows.stopAll();
     try {
       if (fs.readFileSync(P.PID_FILE, 'utf8') === String(process.pid)) fs.unlinkSync(P.PID_FILE);
     } catch (_) {}

@@ -9,6 +9,7 @@ const claude = require('./claude');
 const view = require('./view');
 const diary = require('./diary');
 const search = require('./search');
+const daemon = require('./daemon');
 const { SORTS } = require('../public/subsort');
 
 const PROTOCOLS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -137,6 +138,11 @@ const TOOLS = [
         limit: { type: 'number', description: 'How many sessions to show. Default 10, at most 50.' },
       },
     },
+  },
+  {
+    name: 'board_run_workflow',
+    description: "Run one of a card's workflows now: a saved prompt the board runs on its own with `claude -p` on this Mac's Claude login (no API key), in the background. Its progress and result appear on the card, and the result is added as a note. Only run a workflow the user asked for; board_get_card lists a card's workflows.",
+    inputSchema: { type: 'object', properties: { card: CARD, workflow: { type: 'string', description: 'Workflow name or id. May be omitted when the card has only one.' } } },
   },
   {
     name: 'board_diary',
@@ -343,6 +349,14 @@ const HANDLERS = {
     return search.markdown({ q: String(a.query), limit: a.limit, project: a.project }, snapshot().state);
   },
 
+  async board_run_workflow(a) {
+    const snap = snapshot();
+    const card = store.findCard({ cards: snap.state.cards }, cardRef(a, snap));
+    const j = await daemon.call('/api/workflow/run', { card: card.id, workflow: a.workflow || '', trigger: 'claude' });
+    if (!j.ok) throw new store.UserError(j.error || 'The workflow did not start.');
+    return `Started the workflow on ${card.key}. It runs in the background; its progress and result show on the card (${P.boardUrl('card=' + card.key)}), and the result is added as a note when it finishes.`;
+  },
+
   board_diary(a) {
     const day = a.date ? diary.parseDay(a.date) : '';
     if (a.date && !day) throw new store.UserError('Give the date as YYYY-MM-DD, "today" or "yesterday".');
@@ -390,11 +404,17 @@ function onMessage(msg) {
       const name = params && params.name;
       const handler = HANDLERS[name];
       if (!handler) return fail(id, -32602, `Unknown tool: ${name}`);
-      try {
-        return reply(id, { content: [{ type: 'text', text: String(handler((params && params.arguments) || {})) }] });
-      } catch (e) {
+      const failed = (e) => {
         if (!(e instanceof store.UserError)) process.stderr.write(`taskboard: ${e.stack || e.message}\n`);
         return reply(id, { content: [{ type: 'text', text: e.message }], isError: true });
+      };
+      try {
+        const out = handler((params && params.arguments) || {});
+        // a tool that has to ask the board server answers later
+        if (out && typeof out.then === 'function') return out.then((text) => reply(id, { content: [{ type: 'text', text: String(text) }] }), failed);
+        return reply(id, { content: [{ type: 'text', text: String(out) }] });
+      } catch (e) {
+        return failed(e);
       }
     }
     default:

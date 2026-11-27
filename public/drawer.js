@@ -206,6 +206,8 @@ function drawerHtml(card) {
         </div>
       </div>
 
+      ${workflowsSection(card)}
+
       <div class="sec">
         <div class="sec-head"><h4>Connections</h4></div>
         ${connectionRows(card) || '<div class="muted" style="padding:4px 8px">Not connected to other cards.</div>'}

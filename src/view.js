@@ -9,6 +9,7 @@ const store = require('./store');
 const diary = require('./diary');
 const resources = require('./resources');
 const focus = require('./focus');
+const workflows = require('./workflows');
 const { subTree, SORTS } = require('../public/subsort');
 
 const SUB_FROM_STATE = { running: 'in_progress', needs_you: 'blocked', review: 'review', done: 'done', idle: 'in_progress' };
@@ -127,6 +128,21 @@ function folderResolver(sessions) {
   };
 }
 
+/** What the card panel shows for each of a card's workflows: its schedule in words, when it runs next, its latest run. */
+function workflowViews(card, folder) {
+  return (card.workflows || []).map((wf) => {
+    const runs = (card.runs || []).filter((r) => r.workflowId === wf.id).sort((a, b) => b.startedAt - a.startedAt);
+    return {
+      id: wf.id,
+      schedule: workflows.describeSchedule(wf.schedule),
+      nextAt: workflows.nextRun(wf),
+      folder: wf.folder || folder || '',
+      running: runs.some((r) => r.status === 'running'),
+      last: runs[0] || null,
+    };
+  });
+}
+
 function buildState(board, scanResult) {
   const meta = board.sessionMeta;
   const sessions = scanResult.sessions;
@@ -136,6 +152,7 @@ function buildState(board, scanResult) {
     s.token = ackToken(s);
     s.cardId = null;
     s.hidden = !!(meta[s.id] && meta[s.id].hidden);
+    s.workflowRun = !!(meta[s.id] && meta[s.id].workflow); // a run of one of a card's workflows
   }
   const routines = buildRoutines(sessions);
   const ctx = { byId, routines };
@@ -175,7 +192,8 @@ function buildState(board, scanResult) {
     // a PR one session tracks is shown with its state, even if another only mentions it
     const tracked = new Set([...prs.values()].map(resources.trackedPr));
     const related = resources.merge(subs.map((sub) => (byId.get(sub.sessionId) || {}).resources)).filter((r) => !tracked.has(r.key));
-    return { ...card, view: { subs, counts, prs: [...prs.values()], resources: related, tickets: [...tickets], lastActivityAt: lastActivityAt || card.updatedAt, folder: folderOf(card) } };
+    const folder = folderOf(card);
+    return { ...card, view: { subs, counts, prs: [...prs.values()], resources: related, tickets: [...tickets], lastActivityAt: lastActivityAt || card.updatedAt, folder, workflows: workflowViews(card, folder) } };
   });
 
   // Connections nobody drew but the sessions imply.
@@ -656,6 +674,19 @@ function cardMarkdown(card, state, sort) {
     if (o) conns.push(`- possibly related to ${o.key} · ${o.title}: ${p.reasons.join('; ')}`);
   }
   if (conns.length) L.push('## Connections', '', ...conns, '');
+  if ((card.workflows || []).length) {
+    L.push('## Workflows', '', '_Saved prompts the board runs on its own with `claude -p`, on the Claude login of this Mac. Start one with board_run_workflow._', '');
+    for (const wf of card.workflows) {
+      const wv = (v.workflows || []).find((x) => x.id === wf.id) || {};
+      const bits = [wv.schedule || 'Run by hand', `access: ${(workflows.ACCESS[wf.access] || workflows.ACCESS.read).label.toLowerCase()}`];
+      if (!wf.enabled) bits.push('schedule paused');
+      if (wv.nextAt) bits.push(`next run ${fmtDate(wv.nextAt)}`);
+      L.push(`- **${wf.name}** (\`${wf.id}\`) — ${bits.join(' · ')}${wv.folder ? `, in ${wv.folder}` : ''}`);
+      const r = wv.last;
+      if (r) L.push(`  - Last run ${fmtDate(r.startedAt)}: ${r.status}${r.status === 'running' && r.activity ? ` (${r.activity})` : ''}${r.error ? ` — ${r.error}` : ''}`);
+    }
+    L.push('');
+  }
   if (card.attachments.length) {
     L.push('## Attachments', '');
     for (const f of card.attachments) L.push(`- ${f.name} (${fmtSize(f.size)}): ${store.attachmentFile(f)}`);
