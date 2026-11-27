@@ -13,7 +13,11 @@ It is for people who run many Claude Code sessions on related work and lose trac
 - Keeps a diary of each day's work as short notes, not copies of your sessions: about 12 KB a day.
 - Comes with a Mac app (Dock icon, menu-bar count of sessions waiting on you), a `/board` skill and `board_*` tools for Claude, and a `taskboard` command.
 
-The screenshots here show made-up data from [`scripts/demo.js`](scripts/demo.js).
+**Watch the 90-second demo** (click the picture to play it):
+
+[![A 90-second walkthrough of the board, a card, Focus, Needs me, Sessions, search, Connections and the Diary](docs/demo/taskboard-demo.jpg)](docs/demo/taskboard-demo.mp4)
+
+The screenshots and the demo video here show made-up data from [`scripts/demo.js`](scripts/demo.js).
 
 > This is a personal tool, not an Anthropic product. Built and tested on macOS with the Claude desktop app's Code tab and the Claude Code CLI.
 
