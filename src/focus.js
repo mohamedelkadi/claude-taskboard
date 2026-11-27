@@ -8,8 +8,8 @@ const TAIL_BYTES = 768 * 1024; // a transcript can be hundreds of MB; the open c
 const PREVIEW_CHARS = 2400;
 const PLAN_CHARS = 12000;
 const HOUR = 3600000;
-const REPLY_WINDOW = 24 * HOUR; // a finished turn's question older than this stays on Needs me
 const ACTIVE_WINDOW = 2 * HOUR;
+const REPLY_WINDOW = ACTIVE_WINDOW; // a finished turn's question older than this stays on Needs me
 const MAX_ACTIVE = 12;
 // these hold other work open while it runs: being unanswered says nothing about a prompt
 const CONTAINERS = new Set(['Agent', 'Task', 'Workflow']);
@@ -141,8 +141,8 @@ function readWaiting(file, live) {
 
 /**
  * Which sessions Focus mode shows, as ids, in the order they should come up.
- * decide: stopped on a live prompt, oldest first. reply: a finished turn asked something and
- * is still current, oldest first. active: running or just finished, for the quiet strip.
+ * decide: stopped on a live prompt, oldest first. reply: a finished turn asked something in the
+ * last two hours, newest first. active: running or just finished, for the quiet strip.
  */
 function build(sessions, routines, now = Date.now()) {
   const latest = new Set([...routines.values()].map((r) => r.latest.id));
@@ -150,7 +150,7 @@ function build(sessions, routines, now = Date.now()) {
   const needs = open.filter((s) => s.estate === 'needs_you');
   const oldest = (at) => (a, b) => at(a) - at(b);
   const decide = needs.filter((s) => s.waiting).sort(oldest((s) => s.waiting.since || s.lastActivityAt));
-  const reply = needs.filter((s) => !s.waiting && (s.live || now - s.lastActivityAt < REPLY_WINDOW)).sort(oldest((s) => s.lastActivityAt));
+  const reply = needs.filter((s) => !s.waiting && now - s.lastActivityAt < REPLY_WINDOW).sort((a, b) => b.lastActivityAt - a.lastActivityAt);
   const active = open
     .filter((s) => !s.hidden && (s.estate === 'running' || (s.estate !== 'needs_you' && now - s.lastActivityAt < ACTIVE_WINDOW)))
     .sort((a, b) => (b.estate === 'running') - (a.estate === 'running') || b.lastActivityAt - a.lastActivityAt)

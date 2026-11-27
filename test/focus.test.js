@@ -79,8 +79,9 @@ test('which sessions come up, and in what order', () => {
   const sessions = [
     s('new-prompt', 'needs_you', 0, { live: 'waiting', waiting: { since: now - 1000 } }),
     s('old-prompt', 'needs_you', 1, { live: 'waiting', waiting: { since: now - 9000 } }),
-    s('recent-ask', 'needs_you', 5),
-    s('older-ask', 'needs_you', 20),
+    s('recent-ask', 'needs_you', 0.5),
+    s('older-ask', 'needs_you', 1.5),
+    s('hours-ago-ask', 'needs_you', 5),
     s('stale-ask', 'needs_you', 30),
     s('stale-but-open', 'needs_you', 30, { live: 'idle' }),
     s('archived', 'needs_you', 1, { archived: true }),
@@ -94,7 +95,7 @@ test('which sessions come up, and in what order', () => {
   const routines = new Map([['r', { latest: sessions.find((x) => x.id === 'latest-run') }]]);
   const f = focus.build(sessions, routines, now);
   assert.deepEqual(f.decide, ['old-prompt', 'new-prompt'], 'live prompts, longest waiting first');
-  assert.deepEqual(f.reply, ['stale-but-open', 'older-ask', 'recent-ask'], 'a day old is history unless its process is still open');
+  assert.deepEqual(f.reply, ['recent-ask', 'older-ask'], 'asked in the last two hours, newest first, even with its process still open');
   assert.deepEqual(f.active, ['latest-run', 'running', 'just-done']);
 });
 

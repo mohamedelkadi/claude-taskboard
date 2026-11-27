@@ -111,7 +111,7 @@ Further down the card:
 
 ![Needs me: the sessions waiting on an answer, each with its question](docs/screenshots/needs-me.png)
 
-**Focus** shows only what needs a decision now, one at a time, from one project or several. Sessions stopped on a question, a tool approval or a plan come first, then finished turns that asked something in the last 24 hours. A new prompt joins the queue and never replaces the card you are reading. Answer it in Claude: `o` opens the session, `h` marks it handled, and `j` and `k` move between decisions.
+**Focus** shows only what needs a decision now, one at a time, from one project or several. Sessions stopped on a question, a tool approval or a plan come first, then finished turns that asked something in the last two hours, newest first. A new prompt joins the queue and never replaces the card you are reading. Answer it in Claude: `o` opens the session, `h` marks it handled, and `j` and `k` move between decisions.
 
 ### 5. Find any session
 
